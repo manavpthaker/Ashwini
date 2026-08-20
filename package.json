@@ -1,0 +1,49 @@
+{
+  "name": "ashwini",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "desktop:dev": "concurrently -k \"pnpm dev\" \"wait-on http://127.0.0.1:3000 && ASHWINI_DEV_SERVER_URL=http://127.0.0.1:3000 electron .\"",
+    "desktop:build": "pnpm build && electron-builder",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "main": "desktop/main.cjs",
+  "dependencies": {
+    "next": "16.3.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "concurrently": "^10.0.5",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "9.39.3",
+    "eslint-config-next": "16.3.1",
+    "typescript": "5.9.2",
+    "wait-on": "^9.1.0"
+  },
+  "packageManager": "pnpm@10.14.0",
+  "build": {
+    "appId": "health.ashwini.desktop",
+    "productName": "ashwini",
+    "files": [
+      "desktop/**",
+      "out/**",
+      "public/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.healthcare-fitness"
+    }
+  }
+}
