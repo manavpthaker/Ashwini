@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Badge, Button, Card } from "@/components/ui";
 import {
   evidenceDefinitions,
+  evidenceConnectors,
   mealReference,
   monthDays,
   quietItems,
@@ -22,7 +23,7 @@ import { movementReferences, muscleGroups, referenceProvenance } from "@/lib/lea
 
 type Surface = "today" | "capture" | "review" | "routines" | "library" | "data";
 type CaptureMode = "meal" | "body" | "check-in" | "medication" | "document";
-type LibraryMode = "movement" | "meals" | "evidence" | "medication";
+type LibraryMode = "movement" | "meals" | "evidence" | "sources" | "medication";
 
 const navigation: ReadonlyArray<{ id: Surface; label: string; detail: string }> = [
   { id: "today", label: "Today", detail: "2 open actions" },
@@ -376,7 +377,7 @@ function DocumentCapture({ saved, setSaved }: { saved: boolean; setSaved: (saved
   );
 }
 
-function Review() {
+export function Review() {
   const [domain, setDomain] = useState<DomainId>("training");
   const review = reviews.find((item) => item.id === domain) ?? reviews[0];
   return (
@@ -411,7 +412,7 @@ function Review() {
   );
 }
 
-function Routines() {
+export function Routines() {
   const [active, setActive] = useState(routines[0].id);
   const routine = routines.find((item) => item.id === active) ?? routines[0];
   return (
@@ -443,21 +444,22 @@ function Routines() {
   );
 }
 
-function Library() {
-  const [mode, setMode] = useState<LibraryMode>("movement");
+export function Library() {
+  const [mode, setMode] = useState<LibraryMode>("evidence");
   return (
     <div className="surface-stack library-surface">
       <div className="surface-statusbar">
-        <div><span>Recently opened</span><strong>Goblet squat</strong></div>
-        <div><span>Private meals</span><strong>1 saved</strong></div>
-        <div><span>Source review</span><strong>12 assets pending</strong></div>
+        <div><span>Evidence sources</span><strong>2 configured</strong></div>
+        <div><span>Examine Connect</span><strong>Authorization needed</strong></div>
+        <div><span>Personal record</span><strong>30 synthetic days</strong></div>
       </div>
       <div className="mode-tabs library-tabs" role="tablist" aria-label="Reference library categories">
-        {(["movement", "meals", "evidence", "medication"] as const).map((item) => <button key={item} role="tab" aria-selected={mode === item} className={mode === item ? "active" : ""} onClick={() => setMode(item)}><strong>{item === "movement" ? "Movement atlas" : item === "meals" ? "Meal references" : item === "evidence" ? "Evidence language" : "Medication boundary"}</strong><small>{item === "movement" ? "General education" : item === "meals" ? "Private recurring meals" : item === "evidence" ? "Nine visible statuses" : "Record + handoff only"}</small></button>)}
+        {(["evidence", "sources", "movement", "meals", "medication"] as const).map((item) => <button key={item} role="tab" aria-selected={mode === item} className={mode === item ? "active" : ""} onClick={() => setMode(item)}><strong>{item === "movement" ? "Movement atlas" : item === "meals" ? "Meal references" : item === "evidence" ? "Evidence language" : item === "sources" ? "Science sources" : "Medication lane"}</strong><small>{item === "movement" ? "General education" : item === "meals" ? "Private recurring meals" : item === "evidence" ? "Nine visible statuses" : item === "sources" ? "Coverage + provenance" : "Record + safety handoff"}</small></button>)}
       </div>
       {mode === "movement" && <MovementLibrary />}
       {mode === "meals" && <MealLibrary />}
       {mode === "evidence" && <EvidenceLibrary />}
+      {mode === "sources" && <ScienceSourceLibrary />}
       {mode === "medication" && <MedicationLibrary />}
       <div className="provenance-strip"><span>Asset version</span><strong>{referenceProvenance.version}</strong><span>Review state</span><strong>{referenceProvenance.status}</strong><span>Boundary</span><p>{referenceProvenance.boundary}</p></div>
     </div>
@@ -494,16 +496,32 @@ function EvidenceLibrary() {
   return <section className="evidence-grid">{evidenceDefinitions.map((item, index) => <article key={item.status}><span>{String(index).padStart(2, "0")}</span><EvidencePill status={item.status} /><strong>{item.action}</strong><p>{item.meaning}</p></article>)}</section>;
 }
 
-function MedicationLibrary() {
+function ScienceSourceLibrary() {
   return (
-    <section className="medication-library">
-      <div><p className="app-eyebrow">Allowed reference asset</p><h2>Prescription A</h2><dl><div><dt>Identity</dt><dd>User-entered · masked in demo</dd></div><div><dt>Schedule</dt><dd>Existing prescription schedule</dd></div><div><dt>Supply</dt><dd>Last confirmed June 8</dd></div><div><dt>Handoff</dt><dd>Clinician + pharmacy details</dd></div></dl></div>
-      <div className="never-panel"><EvidencePill status="Route out" /><h2>Safety boundary</h2><p>Interaction checks, dose or timing changes, effectiveness judgments, and prescription experiments are disabled.</p><Button variant="secondary">Prepare clinician handoff</Button></div>
+    <section className="science-source-grid">
+      {evidenceConnectors.map((source) => (
+        <article key={source.name}>
+          <div><span>Evidence connector</span><strong>{source.status}</strong></div>
+          <h2>{source.name}</h2>
+          <p className="source-scope">{source.scope}</p>
+          <dl><div><dt>What it adds</dt><dd>{source.coverage}</dd></div><div><dt>Coverage boundary</dt><dd>{source.boundary}</dd></div></dl>
+          {source.href.startsWith("http") && <a href={source.href} target="_blank" rel="noreferrer">Open provider documentation ↗</a>}
+        </article>
+      ))}
     </section>
   );
 }
 
-function Data() {
+function MedicationLibrary() {
+  return (
+    <section className="medication-library">
+      <div><p className="app-eyebrow">Protected record</p><h2>Prescription A</h2><dl><div><dt>Identity</dt><dd>User-entered · masked in demo</dd></div><div><dt>Schedule</dt><dd>Existing prescription schedule</dd></div><div><dt>Supply</dt><dd>14 units confirmed today</dd></div><div><dt>Safety source</dt><dd>Examine Connect can check supplement–drug pairs after authorization</dd></div><div><dt>Handoff</dt><dd>Clinician + pharmacy details</dd></div></dl></div>
+      <div className="never-panel"><EvidencePill status="Route out" /><h2>Specialist gate</h2><p>Ashwini can surface a cited supplement interaction and recommend avoiding a risky combination. Prescription changes, drug–drug questions, and treatment decisions go to the pharmacist or prescriber.</p><Button variant="secondary">Prepare specialist handoff</Button></div>
+    </section>
+  );
+}
+
+export function Data() {
   return (
     <div className="surface-stack data-surface">
       <div className="surface-statusbar">

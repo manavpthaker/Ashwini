@@ -88,6 +88,34 @@ export interface TodayScheduleItem {
   state: "done" | "open" | "scheduled";
 }
 
+export interface AdvisorMessage {
+  id: string;
+  role: "user" | "ashwini";
+  time: string;
+  text: string;
+  receipt?: string;
+  kind?: "record" | "recommendation" | "question" | "route";
+}
+
+export interface MiddayPriority {
+  id: string;
+  time: string;
+  domain: string;
+  title: string;
+  detail: string;
+  action: string;
+  state: "now" | "next" | "later";
+}
+
+export interface EvidenceConnector {
+  name: string;
+  status: string;
+  scope: string;
+  coverage: string;
+  boundary: string;
+  href: string;
+}
+
 export const evidenceDefinitions: readonly { status: EvidenceStatus; action: string; meaning: string }[] = [
   { status: "Recorded", action: "Store", meaning: "A source says this occurred. It is not yet an interpretation." },
   { status: "Unusable", action: "Block", meaning: "Quality or confounds prevent this window from supporting a verdict." },
@@ -98,6 +126,106 @@ export const evidenceDefinitions: readonly { status: EvidenceStatus; action: str
   { status: "Consistent pattern", action: "Compare", meaning: "A relationship recurs across comparable clean windows." },
   { status: "Personally useful", action: "Keep", meaning: "Repeated personal evidence supports the bounded routine and target." },
   { status: "Route out", action: "Handoff", meaning: "The question belongs with a clinician, pharmacist, or dermatologist." },
+] as const;
+
+export const initialConversation: readonly AdvisorMessage[] = [
+  {
+    id: "msg-0736-user",
+    role: "user",
+    time: "7:36 AM",
+    text: "Breakfast was two eggs, toast, and coffee. Slept 6 hours 18 minutes.",
+    receipt: "Breakfast + sleep recorded",
+    kind: "record",
+  },
+  {
+    id: "msg-0737-ashwini",
+    role: "ashwini",
+    time: "7:37 AM",
+    text: "I logged breakfast at roughly 24–30 g protein and marked sleep below your usual range. No morning change needed. I’ll use both when I make the training call this afternoon.",
+    receipt: "Nutrition estimate · medium confidence",
+    kind: "recommendation",
+  },
+  {
+    id: "msg-0803-user",
+    role: "user",
+    time: "8:03 AM",
+    text: "Prescription A taken. Supply count is 14.",
+    receipt: "Protected adherence record",
+    kind: "record",
+  },
+  {
+    id: "msg-1012-user",
+    role: "user",
+    time: "10:12 AM",
+    text: "Focus is 4 out of 5. Energy feels normal and the shoulder is quiet.",
+    receipt: "Check-in + training context",
+    kind: "record",
+  },
+  {
+    id: "msg-1013-ashwini",
+    role: "ashwini",
+    time: "10:13 AM",
+    text: "Good enough to keep the 4:30 session on the board. I’m holding the final volume call until 3:45 because sleep was short.",
+    receipt: "Training plan retained · recheck scheduled",
+    kind: "recommendation",
+  },
+  {
+    id: "msg-1218-ashwini",
+    role: "ashwini",
+    time: "12:18 PM",
+    text: "It’s midday and I still need lunch. You train in 4 hours 12 minutes. Send a photo or tell me what you ate; today I’d favor a familiar meal with 30–40 g protein and a normal carbohydrate portion.",
+    receipt: "Missing input · lunch",
+    kind: "question",
+  },
+] as const;
+
+export const middayPriorities: readonly MiddayPriority[] = [
+  {
+    id: "lunch",
+    time: "Now",
+    domain: "Nutrition",
+    title: "Log lunch before the afternoon disappears.",
+    detail: "No meal is recorded after breakfast. Training starts in 4h 12m; a familiar 30–40 g protein meal is the best fit today.",
+    action: "Tell Ashwini",
+    state: "now",
+  },
+  {
+    id: "training",
+    time: "3:45 PM",
+    domain: "Training",
+    title: "Make the final volume call.",
+    detail: "The session stays on. Short sleep makes full volume conditional on energy and shoulder status at the pre-session check.",
+    action: "Recheck later",
+    state: "next",
+  },
+  {
+    id: "refill",
+    time: "This week",
+    domain: "Medication",
+    title: "Start the refill request.",
+    detail: "The confirmed supply is 14. That is enough runway, but waiting until next week adds avoidable risk.",
+    action: "Open handoff",
+    state: "later",
+  },
+] as const;
+
+export const evidenceConnectors: readonly EvidenceConnector[] = [
+  {
+    name: "Examine Connect",
+    status: "Adapter ready · authorization needed",
+    scope: "Supplement–drug and supplement–supplement safety",
+    coverage: "Returns graded interaction evidence, severity, notes, and PubMed references for a submitted regimen.",
+    boundary: "Does not cover drug–drug interactions. Efficacy and dosing require a separate Examine license. No live query runs in this synthetic workspace.",
+    href: "https://connect.examine.com/",
+  },
+  {
+    name: "Personal record",
+    status: "Available · 30-day synthetic history",
+    scope: "Meals, routines, recovery, training, and follow-through",
+    coverage: "Supports time-aware recommendations and bounded personal pattern comparisons.",
+    boundary: "A personal association is not a diagnosis and does not override a safety source or specialist decision.",
+    href: "#personal-record",
+  },
 ] as const;
 
 export const todayDecisions: readonly DecisionItem[] = [
@@ -329,6 +457,7 @@ export const sources: readonly SourceRecord[] = [
   { name: "Prescription A", kind: "Adherence + supply", owner: "Protected record", freshness: "Today · 8:03 AM", state: "Protected", note: "Identity masked. Never used for dose, timing, interaction, or effectiveness advice." },
   { name: "Body protocol", kind: "Standardized visuals", owner: "Private capture", freshness: "Today · 7:32 AM", state: "Available", note: "Abstract placeholders only. One misaligned set is retained and excluded." },
   { name: "Lab report", kind: "Document record", owner: "User upload", freshness: "Jun 10", state: "Protected", note: "Dummy document metadata only. Values may be stored but are not clinically interpreted here." },
+  { name: "Examine Connect", kind: "Supplement interaction safety", owner: "API adapter · not authorized", freshness: "Not queried", state: "Needs review", note: "Integration-ready for supplement–drug and supplement–supplement checks. No API key, live result, efficacy, dosing, or drug–drug coverage is represented." },
   { name: "Therapy material", kind: "Sensitive context", owner: "Out of scope", freshness: "Never", state: "Excluded", note: "Permanently excluded as an inference source." },
 ] as const;
 
@@ -366,11 +495,11 @@ export const monthDays: readonly MonthDay[] = [
 ] as const;
 
 export const todaySchedule: readonly TodayScheduleItem[] = [
-  { time: "8:03 AM", domain: "Medication", title: "Prescription A", detail: "Recorded as taken", state: "done" },
+  { time: "7:36 AM", domain: "Nutrition", title: "Eggs + toast", detail: "Breakfast range recorded", state: "done" },
+  { time: "8:03 AM", domain: "Medication", title: "Prescription A", detail: "Taken · supply 14", state: "done" },
   { time: "10:12 AM", domain: "Focus", title: "Morning check-in", detail: "Focus 4 · mood neutral", state: "done" },
-  { time: "12:41 PM", domain: "Nutrition", title: "House Dal v1", detail: "Range saved · medium confidence", state: "done" },
-  { time: "4:30 PM", domain: "Training", title: "High-volume session", detail: "Recovery-rule decision open", state: "open" },
-  { time: "8:00 PM", domain: "Prompts", title: "Blackout window", detail: "No mood or focus prompts after this time", state: "scheduled" },
+  { time: "12:18 PM", domain: "Nutrition", title: "Lunch is missing", detail: "Photo or plain-language input needed", state: "open" },
+  { time: "4:30 PM", domain: "Training", title: "Upper-body session", detail: "Volume recheck scheduled for 3:45", state: "scheduled" },
 ] as const;
 
 export const mealReference = {

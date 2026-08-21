@@ -1,23 +1,23 @@
 # ashwini Product Requirements Document
 
-**Status:** Product direction locked; reference-layer scaffold authorized
+**Status:** Product direction revised; conversational advisor prototype authorized
 
-**Version:** 0.3
+**Version:** 0.4
 
 **Working domain:** `ashwini.health`
 **Audience:** One person—the owner of the data and the decision-maker
 
 ## 1. Product thesis
 
-ashwini is a private, single-subject health instrument and contextual learning library.
+ashwini is a private, single-subject health advisor and contextual learning system.
 
-It turns a messy stream of body, training, nutrition, medication-adherence, and standardized visual data into a small number of decisions and personal learning routines. It also keeps the practical reference material needed to understand a task—such as muscle groups, movement patterns, training vocabulary, and personal meal references—inside the same private system. It does not surface observations merely because they are available. It does not diagnose. It does not impersonate a clinician.
+It behaves like one continuous conversation with a team that knows the user: a practical synthesis of primary-care navigation, nutrition, training, recovery, and personal experimentation. It turns a messy stream of body, training, food, medication-adherence, questions, documents, and standardized visual data into a small number of timely recommendations and personal routines. It can form bounded working inferences and recommend low-risk, reversible actions when the evidence and the user’s history support them. It does not diagnose, prescribe, or impersonate a licensed professional.
 
 The organizing constraint is:
 
-> Anything Ashwini says must either change what happens next or protect the user from drawing a false conclusion.
+> Anything Ashwini says must help decide what happens next, improve the shared record, or protect the user from drawing a false conclusion.
 
-The product is best understood as an **evidence router**, not an omniscient inference engine. It records reality, evaluates whether the available evidence is usable, recognizes patterns worth testing, supports small low-risk routines, and routes higher-stakes matters to the appropriate human professional.
+The product is best understood as a **bounded multidisciplinary advisor**. It records reality, combines relevant context, evaluates evidence quality, makes practical recommendations, learns from follow-through, and routes higher-stakes matters to the appropriate human specialist. Ashwini is allowed to have a point of view; it must make the basis, confidence, and next check inspectable.
 
 ## 2. The user problem
 
@@ -26,15 +26,15 @@ Personal health data currently fails in two opposite ways:
 - It is fragmented across a scale, wearables, photos, apps, memories, messages, and medical documents.
 - When collected, it becomes an endless dashboard of observations that does not clarify what to do.
 
-The user wants to learn from daily life without turning life into clinical research or accepting false precision. They need a system that can distinguish a one-off fluctuation from a repeating pattern, propose an intentional comparison when appropriate, and make uncertainty visible at every stage.
+The user wants to learn from daily life without turning life into clinical research, operating five separate trackers, or accepting false precision. They need one place to say what happened, ask a question, or attach a source; a system that decides how to structure that input; and a home screen that makes the current hour legible.
 
 ## 3. Product outcome
 
-Ashwini should create a sustainable habit:
+Ashwini should create a sustainable relationship:
 
-> Notice → label uncertainty → make one small adjustment → compare under similar conditions → keep, reject, or defer.
+> Say what happened → get a useful read → take the next action → follow up → keep, change, or ask a specialist.
 
-Success is not the number of metrics collected. Success is a small set of routines the user has reason to believe work better for their stated goals.
+Success is not the number of metrics collected or conversations produced. Success is fewer missed inputs, better decisions in the moment, a small set of routines that work for the user, and better-prepared conversations with specialists.
 
 ## 4. Core product principles
 
@@ -46,7 +46,27 @@ Success is not the number of metrics collected. Success is a small set of routin
 
 Ashwini speaks only for a clear decision, a necessary data-quality block, an agreed scheduled review, or a safety route-out.
 
-### 4.2 The epistemic status must be visible
+### 4.2 The current moment is the primary interface
+
+The home screen answers four questions immediately: what time context am I in, what has already happened, what matters next, and what input is missing? It is time-of-day aware, not merely a daily dashboard. At Friday midday it may ask for lunch, show the time until training, and identify the one decision that must be revisited before the session.
+
+Past records, month summaries, and review tools remain available, but they do not precede the current moment. The first viewport is a shift brief, not a report.
+
+### 4.3 One conversational intake
+
+All user-originated input begins in one conversational surface. The user may type, speak, send a photo, attach a document, tap a quick answer, or correct an earlier interpretation. Ashwini decides whether the input becomes a meal estimate, adherence event, symptom note, training result, question, task, document, or specialist-handoff item.
+
+Structured forms are progressive tools inside the conversation, not separate destinations the user must understand in advance. Ashwini asks only the highest-value follow-up question and shows what it recorded or changed.
+
+### 4.4 Bounded recommendations and specialist gates
+
+Ashwini may combine the user’s history, current plan, personal patterns, and external evidence to make recommendations in low-risk, reversible domains such as meal timing, protein and hydration habits, training volume, exercise selection, sleep routines, and whether a supplement is worth researching. It may state a working inference when it explains the facts and uncertainty behind it.
+
+Ashwini routes out urgent or escalating symptoms, diagnosis, prescription changes, drug–drug questions, pregnancy, severe supplement interactions, rehabilitation, and other decisions where a qualified professional needs to evaluate the person. A route-out should include a concise handoff and the safest immediate next step available; it should not become a generic disclaimer repeated throughout the interface.
+
+The persistent product status communicates the overall boundary. Recommendation details carry provenance, confidence, and escalation state on demand.
+
+### 4.5 The epistemic status must be visible
 
 Every meaningful output carries a label. A guess cannot become a fact by repeated display.
 
@@ -62,21 +82,21 @@ Every meaningful output carries a label. A guess cannot become a fact by repeate
 | Personally useful | A repeated, safe comparison supports retaining a routine. | “This routine was more reliable for the defined target.” |
 | Route out | The system must defer to a clinician, pharmacist, or dermatologist. | “Documented for a clinician handoff; Ashwini will not interpret this.” |
 
-### 4.3 Daily learning is real; daily verdicts are not
+### 4.6 Daily learning is real; daily verdicts are not
 
 Not every learning routine must be a formal randomized N-of-1 trial. The product may help the user run informal, low-risk **micro-tests** and remember naturally occurring variations.
 
 It must not call a result after two days merely because two days look promising. Daily actions create evidence; weekly or protocol-based reviews interpret it. Formal comparison is reserved for questions that are important, safely reversible, measurable, and repeatable.
 
-### 4.4 Slow systems require slow reviews
+### 4.7 Slow systems require slow reviews
 
 Fast outcomes—such as a workout’s completion, a simple adherence behavior, or an immediate routine outcome—may be compared over sessions or days. Training progression, body aesthetics, skin, hair, and labs require the time scale of the underlying system. Daily photos may validate a capture protocol, but cannot establish daily biological change.
 
-### 4.5 Privacy is a product property
+### 4.8 Privacy is a product property
 
 The default topology remains private: the iPhone captures; a private Mac mini service holds canonical data and handles scheduled work; Obsidian, if used, is rendered output rather than the source of truth. There is no public ingress. The implementation must define encryption, backup, retention, access controls, offline-data handling, and model-provider disclosure before personal data is ingested.
 
-### 4.6 Knowledge is an asset, not an inference
+### 4.9 Knowledge is an asset, not an inference
 
 ashwini keeps concise, versioned reference assets so the user does not have to leave the product to understand a movement, muscle group, measurement, food-estimate caveat, or evidence label. Reference material is educational context; it is never silently promoted to a conclusion about the user's body, symptoms, medication, or treatment.
 
@@ -92,10 +112,10 @@ Ashwini must stay on the appropriate rung for the available evidence.
 |---|---|---|---|
 | 0 | Recorded fact | “Three upper-body sessions were logged this week.” | Store; normally stay silent. |
 | 1 | Data-quality fact | “Dose adherence and travel made this comparison unreadable.” | Block a verdict. |
-| 2 | Operational inference | “Today’s scheduled workload conflicts with your pre-agreed recovery rule.” | Offer a constrained choice. |
-| 3 | Observed association | “Late caffeine and lower next-day focus responses recur in clean windows.” | Propose a hypothesis or micro-test. |
-| 4 | Personal comparison result | “Across repeated comparable periods, routine A supported the defined target more reliably than B.” | Suggest retaining the routine. |
-| 5 | Clinical routing | “This medication or lesion question needs a professional.” | Document and route out; do not interpret. |
+| 2 | Operational inference | “You train in four hours and lunch is still missing.” | Recommend the immediate low-risk action. |
+| 3 | Working synthesis | “Short sleep plus two low-energy check-ins makes the full-volume session a poor bet today.” | Recommend an adjustment and state what would change the call. |
+| 4 | Personal comparison result | “Across repeated comparable periods, routine A supported the defined target more reliably than B.” | Recommend retaining, revising, or stopping the routine. |
+| 5 | Specialist routing | “This new or worsening symptom needs professional evaluation.” | Recommend the safest route and prepare a concise handoff. |
 
 No Level 3 association may be presented as Level 4 causality. No Level 4 result may be generalized beyond the user, intervention, target, and observation window that produced it.
 
@@ -175,15 +195,17 @@ The system should become personally better over time without requiring full reci
 
 ### 7.3 Medication adherence and refill risk
 
-**Purpose:** Maintain an accurate, useful adherence record without crossing into medical advice.
+**Purpose:** Maintain an accurate adherence record, reduce refill and interaction risk, and prepare useful specialist handoffs.
 
 **Possible outputs:**
 
 - Scheduled/actual adherence tracking
 - Refill-risk reminder based on confirmed supply/fill information
 - A data-quality block when a relevant adherence gap or dose change invalidates an experiment or verdict window
+- Supplement–drug and supplement–supplement safety checks from an authorized, cited evidence source
+- A recommendation to avoid, pause consideration, or ask a pharmacist when an interaction result warrants it
 
-**Never:** check drug interactions, suggest dose/timing changes, evaluate prescription effectiveness, or treat a prescriber-controlled medication as an experiment variable.
+**Never:** infer safety from silence, perform an unsupported drug–drug check, suggest prescription dose/timing changes, evaluate prescription effectiveness as a clinical conclusion, or treat a prescriber-controlled medication as an experiment variable.
 
 Time-critical medication reminders must be delivered through a reliable native iOS mechanism, not depend solely on a Mac mini.
 
@@ -225,7 +247,9 @@ Reference cards must distinguish primary from supporting muscle groups, general 
 
 ### 7.7 Contextual nutrition and medication references
 
-Nutrition reference material may explain estimation uncertainty, common food-component terminology, and the user's opt-in recurring meal references. Medication reference material is restricted to user-entered prescription identity, schedule, adherence history, confirmed refill information, clinician/pharmacy handoff details, and the safety boundary. It does not provide drug-interaction, dose, timing, or effectiveness information.
+Nutrition reference material may explain estimation uncertainty, common food-component terminology, and the user's opt-in recurring meal references. Medication and supplement reference material may include user-entered identity, schedule, adherence history, confirmed refill information, cited safety-interaction results, and clinician/pharmacy handoff details. Every external result retains the provider, query time, evidence grade, references, and license/cache constraints. A missing result is never evidence that an interaction does not exist.
+
+The first external evidence connector is **Examine Connect** for supplement–drug and supplement–supplement safety interactions. Its API does not cover drug–drug interactions, efficacy, or dosing. Broader efficacy and dosing content requires a separate license; the product must not scrape or reproduce Examine content. Public literature sources may supplement the research layer, but Ashwini must distinguish a paper, a curated synthesis, and a personal recommendation.
 
 ## 8. Confound and evidence gate
 
@@ -242,7 +266,7 @@ Before any verdict or personal-comparison result, Ashwini checks the window for 
 The gate has three possible outputs:
 
 1. **Clear:** the system may issue the appropriate evidence-labeled output.
-2. **Caveated:** the system may show a low-confidence pattern but cannot recommend a conclusion or action beyond continued tracking.
+2. **Caveated:** the system may offer a low-risk, reversible recommendation while naming the uncertainty and the next fact that would change it.
 3. **Blocked:** the system explains the missing/contaminating conditions and issues no verdict.
 
 Thresholds are not assumed; they must be specified by domain and versioned before implementation. A user override, if ever allowed, must be explicit and permanently retained with the output it affected.
@@ -265,11 +289,11 @@ This makes Ashwini accountable. It can later answer whether its suggestion was u
 
 ## 10. Product surfaces and contextual learning layer
 
-The intended PWA retains three surfaces:
+The intended PWA has three primary surfaces:
 
-1. **Capture:** Photo capture under a protocol, meal/photo capture, alignment feedback, and an offline queue.
-2. **Today:** The current open decision, a required medication/adherence action, and any unanswered short prompt. It is usually nearly empty.
-3. **Review:** Weekly and protocol-based evidence-labeled summaries, paired capture comparison, current learning routines, and decisions/outcomes.
+1. **Now:** A time-of-day brief with the missing input, the next commitment, and the most useful recommendation. This is the default and must be useful in the first viewport.
+2. **Conversation:** The single intake and question surface. Photos, documents, confirmations, corrections, and structured follow-ups happen here in one continuous history.
+3. **Plan and Review:** Active routines, scheduled training/nutrition actions, weekly evidence-labeled summaries, paired capture comparison, and outcomes.
 
 The **Learning layer** is accessible contextually from all three surfaces and directly through an intentional library entry point. It holds reference assets, provenance, review status, and personal notes. It is not a notification surface and does not generate personal conclusions on its own.
 
@@ -277,21 +301,22 @@ Graph browsing and rich historical exploration belong in rendered private notes/
 
 ## 11. Safety and privacy boundaries
 
-1. Nothing diagnoses, prescribes, or replaces clinical care.
+1. Ashwini may infer and recommend within low-risk, reversible lifestyle and performance domains; it does not diagnose or prescribe.
 2. Photos remain private except for the minimum specific paired images required for an explicitly authorized analysis.
 3. No public ingress; the private-network architecture is mandatory.
 4. Moles, lesions, and pigmented spots are never analyzed.
 5. No verdict is issued for a blocked/confounded window.
 6. Prescription medication is never an experimental variable.
-7. No drug-interaction, dose, medication-timing, or medication-effectiveness advice.
+7. Supplement interaction recommendations require a current authorized source result. Drug–drug questions and prescription dose, timing, or treatment changes route to a pharmacist or prescriber.
 8. Critical dose reminders do not rely solely on the Mac mini.
 9. Therapy content is inert and excluded from inference; do not add therapy-transcript storage to the initial scope.
 10. Every model-generated output must carry its evidence status and data provenance.
-11. Reference assets must show their source/provenance, version, review status, and educational boundary; a reference asset is not personalized advice.
+11. Reference assets show source/provenance, version, review status, and scope. Ashwini may use them in personalized recommendations only when it separately states the user facts and reasoning that connect the evidence to the recommendation.
+12. The main interface carries one persistent boundary signal; generic medical disclaimers are not repeated on every recommendation.
 
-## 12. Discovery questions before implementation
+## 12. Implementation and production questions
 
-The product direction is set; these questions require validation rather than assumption:
+The product direction is set and the synthetic prototype may proceed. These questions block real-data or production claims, not interface learning:
 
 1. Which two or three micro-tests are genuinely useful enough to sustain for 30 days?
 2. What photo-confirmation interaction produces a usable nutrition trend with minimal logging burden?
@@ -302,20 +327,23 @@ The product direction is set; these questions require validation rather than ass
 7. What privacy/retention model is acceptable before any health or photo data is stored?
 8. Which initial movement, muscle, and training-reference assets are useful enough to retain offline, and what editorial source/review standard is sufficient for each?
 9. Which reference explanations reduce friction at the point of action without turning ashwini into a generic health-content feed?
+10. What credentials, cost ceiling, cache policy, and display attribution will govern Examine Connect?
+11. Which recommendation categories need specialist-authored rules before they can leave the hobby prototype?
 
 ## 13. Build sequencing after discovery
 
-Implementation begins only after the discovery questions above are answered. The likely sequence is:
+The synthetic prototype proceeds now; real ingestion and unattended recommendation delivery remain gated. The likely sequence is:
 
 1. **Private data foundation:** Canonical storage, provenance, private network, backup/retention controls, and reliable ingest verification.
-2. **Reference foundation:** A versioned, offline-capable starter library for movement patterns, muscle groups, training vocabulary, evidence labels, and user-owned notes. No personal health inference is required to ship this layer.
-3. **Baseline stabilization:** Medication-adherence logging plus one sustainable diet anchor while training has not yet restarted. The two routines are displayed together but stored and interpreted separately.
-4. **One trustworthy loop:** After actual training restart, add training plus photo-assisted nutrition capture, a confound gate, and exactly one weekly evidence-labeled review.
+2. **Conversation foundation:** One multimodal intake that turns free-form input into visible structured records, asks one useful follow-up, and keeps corrections.
+3. **Time-aware Now:** A morning, midday, training-window, and evening brief driven by known commitments and missing inputs.
+4. **Reference and evidence foundation:** Versioned assets plus an authorized Examine Connect safety adapter with citations, grades, cache handling, and explicit coverage limits.
+5. **Baseline and training loops:** Medication-adherence logging, sustainable diet anchors, training plans, photo-assisted nutrition, confound gates, and weekly evidence-labeled review.
 5. **Micro-test support:** Declare a routine, record comparable occurrences, display uncertainty, and log outcomes.
 6. **Visual protocol:** Capture-quality enforcement, paired review, and body/skin visual-delta language only.
 7. **Additional domains:** ESM, labs, hair, and graph rendering only when their safety and evidence conditions are satisfied.
 
-No graph mining, broad model inference, therapy layer, or automated clinical interpretation belongs in the initial implementation.
+No therapy layer, unsupported clinical interpretation, or invisible autonomous medication action belongs in the initial implementation.
 
 ## 14. Success criteria
 
@@ -323,6 +351,9 @@ Ashwini is working when, after a meaningful period of use, the user can point to
 
 - A small set of repeatable routines with a clear target and evidence status
 - At least one decision they changed because Ashwini made the conditions legible
+- A home screen that identifies the right missing input and next action for the current time of day
+- One conversational intake that successfully routes food, training, adherence, symptoms, questions, photos, and documents
+- Recommendations that are specific enough to act on and easy to inspect for reasoning and sources
 - At least one tempting conclusion Ashwini correctly refused to make
 - Nutrition history that is useful for trends despite incomplete recipe information
 - Standardized visual comparisons that feel grounded rather than compulsive

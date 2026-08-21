@@ -1,7 +1,7 @@
-import { AshwiniWorkbench } from "@/components/ashwini-workbench";
+import { AshwiniAdvisor } from "@/components/ashwini-advisor";
 
 export default function Home() {
   return (
-    <AshwiniWorkbench />
+    <AshwiniAdvisor />
   );
 }
