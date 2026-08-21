@@ -72,6 +72,22 @@ export interface SourceRecord {
   note: string;
 }
 
+export interface MonthDay {
+  date: string;
+  day: number;
+  weekday: string;
+  state: "quiet" | "recorded" | "routine" | "blocked" | "today";
+  records: number;
+}
+
+export interface TodayScheduleItem {
+  time: string;
+  domain: string;
+  title: string;
+  detail: string;
+  state: "done" | "open" | "scheduled";
+}
+
 export const evidenceDefinitions: readonly { status: EvidenceStatus; action: string; meaning: string }[] = [
   { status: "Recorded", action: "Store", meaning: "A source says this occurred. It is not yet an interpretation." },
   { status: "Unusable", action: "Block", meaning: "Quality or confounds prevent this window from supporting a verdict." },
@@ -314,6 +330,47 @@ export const sources: readonly SourceRecord[] = [
   { name: "Body protocol", kind: "Standardized visuals", owner: "Private capture", freshness: "Today · 7:32 AM", state: "Available", note: "Abstract placeholders only. One misaligned set is retained and excluded." },
   { name: "Lab report", kind: "Document record", owner: "User upload", freshness: "Jun 10", state: "Protected", note: "Dummy document metadata only. Values may be stored but are not clinically interpreted here." },
   { name: "Therapy material", kind: "Sensitive context", owner: "Out of scope", freshness: "Never", state: "Excluded", note: "Permanently excluded as an inference source." },
+] as const;
+
+export const monthDays: readonly MonthDay[] = [
+  { date: "May 25", day: 25, weekday: "Sun", state: "recorded", records: 2 },
+  { date: "May 26", day: 26, weekday: "Mon", state: "routine", records: 4 },
+  { date: "May 27", day: 27, weekday: "Tue", state: "recorded", records: 3 },
+  { date: "May 28", day: 28, weekday: "Wed", state: "blocked", records: 2 },
+  { date: "May 29", day: 29, weekday: "Thu", state: "routine", records: 5 },
+  { date: "May 30", day: 30, weekday: "Fri", state: "recorded", records: 3 },
+  { date: "May 31", day: 31, weekday: "Sat", state: "quiet", records: 1 },
+  { date: "Jun 1", day: 1, weekday: "Sun", state: "quiet", records: 1 },
+  { date: "Jun 2", day: 2, weekday: "Mon", state: "recorded", records: 4 },
+  { date: "Jun 3", day: 3, weekday: "Tue", state: "recorded", records: 3 },
+  { date: "Jun 4", day: 4, weekday: "Wed", state: "routine", records: 5 },
+  { date: "Jun 5", day: 5, weekday: "Thu", state: "recorded", records: 3 },
+  { date: "Jun 6", day: 6, weekday: "Fri", state: "recorded", records: 3 },
+  { date: "Jun 7", day: 7, weekday: "Sat", state: "blocked", records: 2 },
+  { date: "Jun 8", day: 8, weekday: "Sun", state: "quiet", records: 1 },
+  { date: "Jun 9", day: 9, weekday: "Mon", state: "blocked", records: 4 },
+  { date: "Jun 10", day: 10, weekday: "Tue", state: "recorded", records: 4 },
+  { date: "Jun 11", day: 11, weekday: "Wed", state: "routine", records: 5 },
+  { date: "Jun 12", day: 12, weekday: "Thu", state: "blocked", records: 3 },
+  { date: "Jun 13", day: 13, weekday: "Fri", state: "recorded", records: 3 },
+  { date: "Jun 14", day: 14, weekday: "Sat", state: "quiet", records: 1 },
+  { date: "Jun 15", day: 15, weekday: "Sun", state: "recorded", records: 2 },
+  { date: "Jun 16", day: 16, weekday: "Mon", state: "routine", records: 5 },
+  { date: "Jun 17", day: 17, weekday: "Tue", state: "routine", records: 5 },
+  { date: "Jun 18", day: 18, weekday: "Wed", state: "recorded", records: 4 },
+  { date: "Jun 19", day: 19, weekday: "Thu", state: "routine", records: 5 },
+  { date: "Jun 20", day: 20, weekday: "Fri", state: "routine", records: 5 },
+  { date: "Jun 21", day: 21, weekday: "Sat", state: "recorded", records: 4 },
+  { date: "Jun 22", day: 22, weekday: "Sun", state: "quiet", records: 1 },
+  { date: "Jun 23", day: 23, weekday: "Mon", state: "today", records: 4 },
+] as const;
+
+export const todaySchedule: readonly TodayScheduleItem[] = [
+  { time: "8:03 AM", domain: "Medication", title: "Prescription A", detail: "Recorded as taken", state: "done" },
+  { time: "10:12 AM", domain: "Focus", title: "Morning check-in", detail: "Focus 4 · mood neutral", state: "done" },
+  { time: "12:41 PM", domain: "Nutrition", title: "House Dal v1", detail: "Range saved · medium confidence", state: "done" },
+  { time: "4:30 PM", domain: "Training", title: "High-volume session", detail: "Recovery-rule decision open", state: "open" },
+  { time: "8:00 PM", domain: "Prompts", title: "Blackout window", detail: "No mood or focus prompts after this time", state: "scheduled" },
 ] as const;
 
 export const mealReference = {

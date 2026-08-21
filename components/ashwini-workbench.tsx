@@ -5,12 +5,14 @@ import { Badge, Button, Card } from "@/components/ui";
 import {
   evidenceDefinitions,
   mealReference,
+  monthDays,
   quietItems,
   reviews,
   routines,
   sources,
   systemQuestions,
   todayDecisions,
+  todaySchedule,
   type DecisionItem,
   type DomainId,
   type EvidenceStatus,
@@ -23,21 +25,21 @@ type CaptureMode = "meal" | "body" | "check-in" | "medication" | "document";
 type LibraryMode = "movement" | "meals" | "evidence" | "medication";
 
 const navigation: ReadonlyArray<{ id: Surface; label: string; detail: string }> = [
-  { id: "today", label: "Today", detail: "Decisions, not noise" },
-  { id: "capture", label: "Capture", detail: "The minimum useful record" },
-  { id: "review", label: "Review", detail: "Comparable windows" },
-  { id: "routines", label: "Routines", detail: "Small things to test" },
-  { id: "library", label: "Library", detail: "Context, with sources" },
-  { id: "data", label: "Data", detail: "Privacy and provenance" },
+  { id: "today", label: "Today", detail: "2 open actions" },
+  { id: "capture", label: "Capture", detail: "5 record types" },
+  { id: "review", label: "Review", detail: "2 ready · 1 blocked" },
+  { id: "routines", label: "Routines", detail: "2 active · 1 candidate" },
+  { id: "library", label: "Library", detail: "12 reference assets" },
+  { id: "data", label: "Data", detail: "8 synthetic sources" },
 ];
 
-const surfaceHeadings: Record<Surface, { eyebrow: string; title: string }> = {
-  today: { eyebrow: "Monday · June 23 · synthetic day", title: "What deserves your attention today?" },
-  capture: { eyebrow: "Five capture modes · one private record", title: "Record reality without turning life into a study." },
-  review: { eyebrow: "Five domains · evidence before verdict", title: "Compare like with like—or refuse the conclusion." },
-  routines: { eyebrow: "Natural variation → micro-test → personal use", title: "Learn one small, reversible thing at a time." },
-  library: { eyebrow: "Versioned reference assets", title: "Understand the task without leaving the decision." },
-  data: { eyebrow: "Private topology · visible provenance", title: "Know where every record came from—and where it stays." },
+const surfaceHeadings: Record<Surface, { eyebrow: string; title: string; context: string }> = {
+  today: { eyebrow: "Monday, June 23", title: "Today", context: "Month 1 · day 30" },
+  capture: { eyebrow: "New private record", title: "Capture", context: "Draft empty · unsaved" },
+  review: { eyebrow: "May 25–June 23", title: "Review", context: "5 domains · 2 ready" },
+  routines: { eyebrow: "Personal learning", title: "Routines", context: "2 active · 1 candidate" },
+  library: { eyebrow: "Private reference assets", title: "Library", context: "12 assets · 4 categories" },
+  data: { eyebrow: "Sources and controls", title: "Data & privacy", context: "8 sources · synthetic workspace" },
 };
 
 const captureModes: ReadonlyArray<{ id: CaptureMode; label: string; detail: string }> = [
@@ -61,7 +63,7 @@ function GatePill({ gate }: { gate: GateStatus }) {
 }
 
 function DemoFlag() {
-  return <div className="demo-flag"><i aria-hidden="true" /><span><strong>Full product prototype</strong>All records are synthetic. Nothing is connected, uploaded, or stored.</span></div>;
+  return <div className="demo-flag"><i aria-hidden="true" /><span><strong>Demo workspace</strong>Synthetic records</span></div>;
 }
 
 export function AshwiniWorkbench() {
@@ -69,7 +71,7 @@ export function AshwiniWorkbench() {
 
   const changeSurface = (next: Surface) => {
     setSurface(next);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0 });
   };
 
   return (
@@ -89,17 +91,17 @@ export function AshwiniWorkbench() {
           ))}
         </nav>
 
-        <div className="app-rail-purpose">
-          <span>The operating rule</span>
-          <p>Anything Ashwini says must change what happens next—or protect you from a false conclusion.</p>
+        <div className="rail-workspace">
+          <div className="rail-avatar" aria-hidden="true">MP</div>
+          <div><strong>Personal workspace</strong><span>Month 1 · May 25–Jun 23</span></div>
         </div>
-        <div className="app-rail-footer"><i /> Local-first direction<br />Private topology not yet built</div>
+        <div className="app-rail-footer"><i /> Last dummy sync · 12:42 PM<br />8 sources in this workspace</div>
       </aside>
 
       <section className="app-workspace">
-        <DemoFlag />
         <header className="app-header">
           <div><p className="app-eyebrow">{surfaceHeadings[surface].eyebrow}</p><h1>{surfaceHeadings[surface].title}</h1></div>
+          <div className="header-utilities"><span>{surfaceHeadings[surface].context}</span><DemoFlag /></div>
         </header>
 
         {surface === "today" && <Today goTo={changeSurface} />}
@@ -125,82 +127,99 @@ function Today({ goTo }: { goTo: (surface: Surface) => void }) {
 
   return (
     <div className="surface-stack today-surface">
-      <section className="purpose-hero" aria-labelledby="purpose-heading">
-        <div className="purpose-copy">
-          <p className="app-eyebrow">The product, in one sentence</p>
-          <h2 id="purpose-heading">Your health data is everywhere. Ashwini turns it into a few next actions—and makes uncertainty impossible to miss.</h2>
-          <p>It is an evidence router: record what happened, test whether the evidence is usable, then act, keep tracking, block a verdict, or hand the question to a professional.</p>
+      <section className="month-overview" aria-labelledby="month-heading">
+        <div className="month-summary">
+          <div><p className="app-eyebrow">Current record</p><h2 id="month-heading">Month 1</h2><span>May 25–June 23</span></div>
+          <dl>
+            <div><dt>Days with records</dt><dd>27 / 30</dd></div>
+            <div><dt>Active routines</dt><dd>2</dd></div>
+            <div><dt>Blocked windows</dt><dd>4</dd></div>
+          </dl>
         </div>
-        <EvidenceRouter />
+        <div className="month-days" aria-label="Thirty day synthetic activity record">
+          {monthDays.map((item) => (
+            <div key={item.date} className={item.state} title={`${item.date}: ${item.records} record${item.records === 1 ? "" : "s"}`}>
+              <span>{item.weekday.slice(0, 1)}</span><strong>{item.day}</strong><i aria-hidden="true" />
+            </div>
+          ))}
+        </div>
+        <div className="month-legend"><span><i className="routine" />Routine day</span><span><i className="recorded" />Recorded</span><span><i className="blocked" />Blocked window</span></div>
       </section>
 
       <section className="today-layout">
         <div className="decision-queue">
           <div className="section-heading">
-            <div><p className="app-eyebrow">Two interruptions</p><h2>Decisions that change today.</h2></div>
-            <Badge tone="recorded">Everything else stays quiet</Badge>
+            <div><p className="app-eyebrow">Action queue</p><h2>2 open</h2></div>
+            <span className="section-note">Ordered by time</span>
           </div>
           <div className="decision-tabs" role="tablist" aria-label="Today’s decisions">
-            {todayDecisions.map((item, index) => (
+            {todayDecisions.map((item) => (
               <button key={item.id} role="tab" aria-selected={activeDecision === item.id} className={activeDecision === item.id ? "active" : ""} onClick={() => chooseDecision(item.id)}>
-                <span>0{index + 1}</span><strong>{item.domain}</strong><small>{item.title}</small>
+                <span>{item.id === "training-volume" ? "4:30 PM" : "By Jun 25"}</span><strong>{item.domain}</strong><small>{item.title}</small>
               </button>
             ))}
           </div>
           <DecisionCard decision={decision} choice={choice} setChoice={setChoice} />
         </div>
 
-        <aside className="today-routines">
+        <aside className="today-schedule">
           <div className="section-heading compact-heading">
-            <div><p className="app-eyebrow">In motion</p><h3>Learning routines</h3></div>
-            <button onClick={() => goTo("routines")}>View all →</button>
+            <div><p className="app-eyebrow">Monday</p><h3>Day log</h3></div>
+            <span>3 recorded</span>
           </div>
-          {routines.slice(0, 2).map((routine) => (
-            <article key={routine.id}>
-              <EvidencePill status={routine.status} />
-              <h4>{routine.title}</h4>
-              <p>{routine.progress}</p>
-              <div><span>Next review</span><strong>{routine.review.split(" · ")[0]}</strong></div>
-            </article>
-          ))}
-          <div className="medication-separation"><i aria-hidden="true" /><p><strong>Medication stays separate.</strong> It can protect evidence quality, but it is never an experiment variable.</p></div>
+          <ol>
+            {todaySchedule.map((item) => (
+              <li key={`${item.time}-${item.title}`} className={item.state}>
+                <time>{item.time}</time><i aria-hidden="true" />
+                <div><span>{item.domain}</span><strong>{item.title}</strong><p>{item.detail}</p></div>
+              </li>
+            ))}
+          </ol>
+          <button className="schedule-capture" onClick={() => goTo("capture")}>+ Add a record</button>
         </aside>
       </section>
 
-      <section className="quiet-section" aria-labelledby="quiet-heading">
-        <div className="section-heading"><div><p className="app-eyebrow">Deliberately suppressed</p><h2 id="quiet-heading">What Ashwini stays quiet about.</h2></div><p>Visible here only to demonstrate the silence policy.</p></div>
-        <div className="quiet-grid">
-          {quietItems.map((item) => (
-            <article key={item.title} className={statusClass(item.status)}>
-              <div><EvidencePill status={item.status} /><span>{item.domain}</span></div>
-              <h3>{item.title}</h3>
-              <p>{item.summary}</p>
+      <section className="today-secondary">
+        <div className="today-routines">
+          <div className="section-heading compact-heading">
+            <div><p className="app-eyebrow">In progress</p><h3>Routines</h3></div>
+            <button onClick={() => goTo("routines")}>Open routines →</button>
+          </div>
+          {routines.slice(0, 2).map((routine) => (
+            <article key={routine.id}>
+              <div><EvidencePill status={routine.status} /><span>{routine.progress}</span></div>
+              <h4>{routine.title}</h4>
+              <p>{routine.target}</p>
+              <footer><span>Review</span><strong>{routine.review}</strong></footer>
+            </article>
+          ))}
+        </div>
+
+        <div className="review-inbox">
+          <div className="section-heading compact-heading">
+            <div><p className="app-eyebrow">Review inbox</p><h3>What changed</h3></div>
+            <button onClick={() => goTo("review")}>Open review →</button>
+          </div>
+          {reviews.slice(0, 3).map((item) => (
+            <article key={item.id}>
+              <div><strong>{item.label}</strong><EvidencePill status={item.status} /></div>
+              <p>{item.title}</p><GatePill gate={item.gate} />
             </article>
           ))}
         </div>
       </section>
-    </div>
-  );
-}
 
-function EvidenceRouter() {
-  const inputs = ["Training", "Meal photos", "Medication", "Body protocol", "Mood + focus"];
-  return (
-    <div className="router" aria-label="Evidence router: sources pass through a quality gate and produce one of four bounded outcomes">
-      <div className="router-inputs">
-        <span className="router-label">Messy inputs</span>
-        {inputs.map((input) => <b key={input}>{input}</b>)}
-      </div>
-      <div className="router-lines" aria-hidden="true"><i /><i /><i /><i /><i /></div>
-      <div className="router-gate">
-        <span className="router-label">Evidence gate</span>
-        <strong>Clear</strong><strong>Caveated</strong><strong>Blocked</strong>
-      </div>
-      <div className="router-arrow" aria-hidden="true">→</div>
-      <div className="router-outcomes">
-        <span className="router-label">Only four outcomes</span>
-        <b>Act</b><b>Track</b><b>No verdict</b><b>Route out</b>
-      </div>
+      <section className="record-quality" aria-labelledby="quality-heading">
+        <div className="section-heading"><div><p className="app-eyebrow">Record quality</p><h2 id="quality-heading">4 items retained without a verdict</h2></div><span className="section-note">They do not enter the action queue</span></div>
+        <div className="quality-list">
+          {quietItems.map((item) => (
+            <article key={item.title} className={statusClass(item.status)}>
+              <div><span>{item.domain}</span><EvidencePill status={item.status} /></div>
+              <strong>{item.title}</strong><p>{item.summary}</p>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -239,7 +258,11 @@ function Capture() {
 
   return (
     <div className="surface-stack capture-surface">
-      <div className="surface-intro"><p>Ashwini asks for the smallest correction automation cannot safely invent. Each capture becomes a <strong>recorded fact first</strong>; interpretation happens only at the right review cadence.</p></div>
+      <div className="surface-statusbar">
+        <div><span>Last record</span><strong>Meal · 12:41 PM</strong></div>
+        <div><span>Today</span><strong>3 records saved</strong></div>
+        <div><span>Offline queue</span><strong>0 pending</strong></div>
+      </div>
       <div className="mode-tabs" role="tablist" aria-label="Capture modes">
         {captureModes.map((item) => (
           <button key={item.id} role="tab" aria-selected={mode === item.id} className={mode === item.id ? "active" : ""} onClick={() => setCaptureMode(item.id)}>
@@ -255,9 +278,9 @@ function Capture() {
       {mode === "document" && <DocumentCapture saved={saved} setSaved={setSaved} />}
 
       <section className="capture-contract">
-        <div><span>Capture burden</span><strong>Ask only for what changes quality</strong><p>No diary for its own sake. Non-response is design feedback.</p></div>
-        <div><span>Default status</span><strong>Recorded—not interpreted</strong><p>A capture cannot silently upgrade its epistemic status.</p></div>
-        <div><span>Offline behavior</span><strong>Queue privately</strong><p>Target behavior only; encryption and conflict rules remain unresolved.</p></div>
+        <div><span>Photo estimates</span><strong>Ranges required</strong><p>Exact values are disabled for image-only meals.</p></div>
+        <div><span>New-record status</span><strong>Recorded</strong><p>Interpretation remains locked until a scheduled review.</p></div>
+        <div><span>Offline queue</span><strong>0 pending</strong><p>No conflicts in this synthetic workspace.</p></div>
       </section>
     </div>
   );
@@ -358,7 +381,11 @@ function Review() {
   const review = reviews.find((item) => item.id === domain) ?? reviews[0];
   return (
     <div className="surface-stack review-surface">
-      <div className="surface-intro"><p>The same product language spans fast outcomes and slow systems, but the cadence changes. Training may be reviewed by session; body change requires standardized weeks; medication remains a record.</p></div>
+      <div className="surface-statusbar">
+        <div><span>Current window</span><strong>May 25–June 23</strong></div>
+        <div><span>Ready now</span><strong>Training · nutrition</strong></div>
+        <div><span>Excluded</span><strong>4 retained windows</strong></div>
+      </div>
       <div className="domain-tabs" role="tablist" aria-label="Review domains">
         {reviews.map((item) => <button key={item.id} role="tab" aria-selected={domain === item.id} className={domain === item.id ? "active" : ""} onClick={() => setDomain(item.id)}><span>{item.label}</span><EvidencePill status={item.status} /></button>)}
       </div>
@@ -389,7 +416,11 @@ function Routines() {
   const routine = routines.find((item) => item.id === active) ?? routines[0];
   return (
     <div className="surface-stack routines-surface">
-      <div className="surface-intro"><p>Ashwini learns from natural variation first. It promotes only low-risk, reversible, measurable questions into deliberate routines. Prescription medication, urgent symptoms, and irreversible choices are permanently ineligible.</p></div>
+      <div className="surface-statusbar">
+        <div><span>Active</span><strong>2 routines</strong></div>
+        <div><span>Next review</span><strong>June 30</strong></div>
+        <div><span>Candidate</span><strong>Post-lunch walk</strong></div>
+      </div>
       <section className="routine-builder">
         <div className="routine-list">
           {routines.map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => setActive(item.id)}><EvidencePill status={item.status} /><strong>{item.title}</strong><span>{item.domain}</span><small>{item.progress}</small></button>)}
@@ -401,7 +432,13 @@ function Routines() {
           <div className="routine-actions"><Button>{routine.status === "Noticed" ? "Choose a start date" : "Record today’s routine"}</Button><Button variant="secondary">Pause routine</Button><Button variant="quiet">Retire and keep history</Button></div>
         </Card>
       </section>
-      <section className="learning-loop"><span>Notice</span><i>→</i><span>Label uncertainty</span><i>→</i><span>One small adjustment</span><i>→</i><span>Compare similar</span><i>→</i><span>Keep · reject · defer</span></section>
+      <section className="routine-history">
+        <div className="section-heading"><div><p className="app-eyebrow">This month</p><h3>Routine activity</h3></div><Badge>4 recent events</Badge></div>
+        <div><time>Jun 23</time><strong>No caffeine after 2 PM</strong><span>Day 5 recorded</span><EvidencePill status="Tracking" /></div>
+        <div><time>Jun 20</time><strong>Familiar meal before afternoon training</strong><span>Target met · clean window</span><EvidencePill status="Early signal" /></div>
+        <div><time>Jun 18</time><strong>No caffeine after 2 PM</strong><span>Routine started</span><EvidencePill status="Tracking" /></div>
+        <div><time>Jun 9</time><strong>Familiar meal before afternoon training</strong><span>Excluded · severe sleep debt</span><EvidencePill status="Unusable" /></div>
+      </section>
     </div>
   );
 }
@@ -410,7 +447,11 @@ function Library() {
   const [mode, setMode] = useState<LibraryMode>("movement");
   return (
     <div className="surface-stack library-surface">
-      <div className="surface-intro"><p>Reference material is educational context, not a feed and not an inference. Every asset exposes its version, provenance, review state, and safety boundary.</p></div>
+      <div className="surface-statusbar">
+        <div><span>Recently opened</span><strong>Goblet squat</strong></div>
+        <div><span>Private meals</span><strong>1 saved</strong></div>
+        <div><span>Source review</span><strong>12 assets pending</strong></div>
+      </div>
       <div className="mode-tabs library-tabs" role="tablist" aria-label="Reference library categories">
         {(["movement", "meals", "evidence", "medication"] as const).map((item) => <button key={item} role="tab" aria-selected={mode === item} className={mode === item ? "active" : ""} onClick={() => setMode(item)}><strong>{item === "movement" ? "Movement atlas" : item === "meals" ? "Meal references" : item === "evidence" ? "Evidence language" : "Medication boundary"}</strong><small>{item === "movement" ? "General education" : item === "meals" ? "Private recurring meals" : item === "evidence" ? "Nine visible statuses" : "Record + handoff only"}</small></button>)}
       </div>
@@ -457,7 +498,7 @@ function MedicationLibrary() {
   return (
     <section className="medication-library">
       <div><p className="app-eyebrow">Allowed reference asset</p><h2>Prescription A</h2><dl><div><dt>Identity</dt><dd>User-entered · masked in demo</dd></div><div><dt>Schedule</dt><dd>Existing prescription schedule</dd></div><div><dt>Supply</dt><dd>Last confirmed June 8</dd></div><div><dt>Handoff</dt><dd>Clinician + pharmacy details</dd></div></dl></div>
-      <div className="never-panel"><EvidencePill status="Route out" /><h2>A record—not a medication engine.</h2><p>Ashwini never checks interactions, proposes a dose or timing change, evaluates effectiveness, or makes a prescription part of a personal experiment.</p><Button variant="secondary">Prepare clinician handoff</Button></div>
+      <div className="never-panel"><EvidencePill status="Route out" /><h2>Safety boundary</h2><p>Interaction checks, dose or timing changes, effectiveness judgments, and prescription experiments are disabled.</p><Button variant="secondary">Prepare clinician handoff</Button></div>
     </section>
   );
 }
@@ -465,14 +506,18 @@ function MedicationLibrary() {
 function Data() {
   return (
     <div className="surface-stack data-surface">
-      <div className="surface-intro"><p>This screen is intentionally honest about the gap between the intended private architecture and a working system. The data is synthetic; the topology below is the approved direction, not deployed infrastructure.</p></div>
+      <div className="surface-statusbar">
+        <div><span>Workspace</span><strong>Synthetic only</strong></div>
+        <div><span>Last dummy sync</span><strong>12:42 PM</strong></div>
+        <div><span>Real ingestion</span><strong>Blocked</strong></div>
+      </div>
       <section className="topology" aria-labelledby="topology-heading">
-        <div className="section-heading"><div><p className="app-eyebrow">No public ingress</p><h2 id="topology-heading">Capture here. Resolve privately. Render where useful.</h2></div><Badge tone="warning">Direction · not deployed</Badge></div>
+        <div className="section-heading"><div><p className="app-eyebrow">No public ingress</p><h2 id="topology-heading">Storage topology</h2></div><Badge tone="warning">Configured direction · not deployed</Badge></div>
         <div className="topology-flow"><article><span>01 · Capture</span><strong>iPhone</strong><p>Photos, confirmations, brief prompts, native medication reminders.</p></article><i aria-hidden="true">→</i><article className="canonical"><span>02 · Canonical</span><strong>Private Mac mini</strong><p>Encrypted source record, evidence gates, scheduled review, audit history.</p></article><i aria-hidden="true">→</i><article><span>03 · Render</span><strong>Ashwini + Obsidian</strong><p>Decisions, review records, handoffs, and versioned context assets.</p></article></div>
       </section>
 
       <section className="source-ledger">
-        <div className="section-heading"><div><p className="app-eyebrow">Source ledger</p><h2>Every claim can trace its inputs.</h2></div><Badge>All dummy sources</Badge></div>
+        <div className="section-heading"><div><p className="app-eyebrow">Source ledger</p><h2>Connected records</h2></div><Badge>All dummy sources</Badge></div>
         <div className="source-table" role="table" aria-label="Synthetic source ledger">
           <div className="source-row source-header" role="row"><span>Source</span><span>Use</span><span>Freshness</span><span>State</span><span>Boundary</span></div>
           {sources.map((source) => <div className="source-row" role="row" key={source.name}><div><strong>{source.name}</strong><small>{source.owner}</small></div><span>{source.kind}</span><time>{source.freshness}</time><span className={`source-state ${source.state.toLowerCase().replaceAll(" ", "-")}`}>{source.state}</span><p>{source.note}</p></div>)}
@@ -480,7 +525,7 @@ function Data() {
       </section>
 
       <section className="unresolved-section">
-        <div><p className="app-eyebrow">Privacy gate</p><h2>Personal ingestion stays blocked until these are real.</h2><p>The PRD makes privacy a product property. A local-looking interface is not enough.</p></div>
+        <div><p className="app-eyebrow">Privacy gate</p><h2>Required before personal data</h2><p>Real ingestion remains disabled while these controls are unresolved.</p></div>
         <ol>{systemQuestions.map((question, index) => <li key={question}><span>0{index + 1}</span><strong>{question}</strong><em>Unresolved</em></li>)}</ol>
       </section>
     </div>

@@ -34,7 +34,7 @@ The prototype includes:
 - **Library:** movement, recurring-meal, evidence-language, and medication-boundary references with visible version and provenance state.
 - **Data:** source freshness, the intended private topology, exclusions, and the unresolved privacy controls that block real personal ingestion.
 
-All displayed records are dummy data. No health source is connected, no image or document analysis is running, and interactions are held only in browser memory. The prototype demonstrates the intended product contract—not a validated health result or a deployed private system.
+All displayed records are dummy data. The interface opens as a lived-in Month 1 workspace, with 30 days of activity, pending decisions, completed captures, active routines, review windows, exclusions, and source history rather than onboarding or marketing content. No health source is connected, no image or document analysis is running, and interactions are held only in browser memory. The prototype demonstrates the intended product contract—not a validated health result or a deployed private system.
 
 ## Non-negotiable boundaries
 
