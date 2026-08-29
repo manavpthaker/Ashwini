@@ -22,7 +22,34 @@ import type { NextRequest } from "next/server";
 
 const IDENTITY_HEADER = "tailscale-user-login";
 
+/**
+ * Hosts that serve traffic from the public internet.
+ *
+ * The identity check below reads a request header. That is only sound because
+ * `tailscale serve` sets the header itself and nothing else can reach the port.
+ * On a public host the same header is attacker-controlled — anyone can send
+ * `Tailscale-User-Login: <the owner>` and walk straight in — so the gate would
+ * be decorative while looking like security.
+ *
+ * Refusing to serve is therefore the only safe behaviour, and there is no
+ * override flag on purpose: running publicly is not a configuration choice,
+ * it is a different architecture that needs real authentication first.
+ */
+function publicHost(): string | null {
+  if (process.env.VERCEL) return "Vercel";
+  if (process.env.AWS_LAMBDA_FUNCTION_NAME) return "AWS Lambda";
+  if (process.env.NETLIFY) return "Netlify";
+  return null;
+}
+
 export function proxy(request: NextRequest): NextResponse {
+  const host = publicHost();
+  if (host) {
+    return deny(
+      `Ashwini refuses to serve from ${host}. PRD 11.3 requires no public ingress, and the identity header this app trusts is set by \`tailscale serve\` — on a public host any caller can forge it. Run it on the private host, or replace the header check with real authentication first.`,
+    );
+  }
+
   const expected = process.env.ASHWINI_TAILSCALE_USER;
   const required = process.env.ASHWINI_REQUIRE_IDENTITY !== "0";
 

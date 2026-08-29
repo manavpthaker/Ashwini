@@ -79,6 +79,21 @@ export function env(): Env {
   const value = parsed.data;
 
   if (value.NODE_ENV === "production") {
+    // proxy.ts refuses these hosts per request; this refuses at boot, so the
+    // process never comes up holding a live DATABASE_URL on a public host.
+    const host = process.env.VERCEL
+      ? "Vercel"
+      : process.env.AWS_LAMBDA_FUNCTION_NAME
+        ? "AWS Lambda"
+        : process.env.NETLIFY
+          ? "Netlify"
+          : null;
+    if (host) {
+      throw new Error(
+        `Refusing to start on ${host}. PRD 11.3 requires no public ingress, and this app's identity gate trusts a request header that only \`tailscale serve\` can be relied on to set. See docs/PRIVACY.md.`,
+      );
+    }
+
     if (!value.DATABASE_URL) {
       throw new Error("DATABASE_URL is required in production.");
     }
