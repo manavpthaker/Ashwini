@@ -2,53 +2,58 @@
 
 **A private personal health advisor that turns the current moment into a useful next action.**
 
-Ashwini behaves like one continuous conversation with a team that knows the user: primary-care navigation, nutrition, training, recovery, and personal experimentation in one place. It can make bounded working inferences and practical recommendations in low-risk, reversible domains. Clinical decisions, urgent or escalating symptoms, diagnosis, and prescription changes become specialist handoffs.
+Ashwini is organized around check-ins, not chat. The user says what changed once; Ashwini records it, exposes the relevant role-based reasoning perspectives, and returns one coordinated next step when the evidence supports one. Those perspectives are Ashwini synthesis—not people, credentials, separate agents, or proof of provider review.
 
-The working product/domain name is **ashwini.health**. Ashwini invokes the Ashvins: the Vedic physicians associated with dawn and healing. The product does not diagnose, prescribe, or replace clinical care.
+The working domain is **ashwini.health**. The product does not diagnose, prescribe, or replace clinical care.
 
-## Product definition
+## Current product
 
-The current product direction is locked in [`docs/PRD.md`](docs/PRD.md).
+The synthetic prototype has three real routes:
 
-Its central interaction is:
+- **Today — `/`:** the current recommendation, its evidence state, the relevant perspectives, and a compact timeline.
+- **Check-in — `/check-in/`:** one intake for food, energy, sleep, pain, medication context, or questions, followed by a structured response and chronological record rather than a chat transcript.
+- **Plan — `/plan/`:** the current decision, user-owned plan choice, active routines, weekly review, and contextual evidence/privacy details.
 
-1. Open to the current time of day and see the immediate call.
-2. Say what happened or ask a question in one conversational intake.
-3. Let Ashwini route the input into the right structured record.
-4. Get a recommendation, the basis for it, and the next fact that could change it.
-5. Follow up, review personal patterns, and involve a specialist when the decision requires one.
+State persists across client-side route changes for the current browser session only. Reloading resets the synthetic scenario. The prototype does not upload attachments, save health data, run a model, query Examine Connect, or imply human review.
 
-The goal is a durable working relationship—not another dashboard or collection of disconnected capture modes.
+The authoritative product contract is [`docs/PRD.md`](docs/PRD.md). Visual, interaction, responsive, accessibility, and language rules are in [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md).
 
-## Repository status
+## Synthetic behavior
 
-This is a product-design repository with a **full-scope synthetic product prototype**. The PRD remains the authority; the interface demonstrates its major surfaces and boundaries without implying that ingestion, storage, model inference, or private infrastructure is already operational.
+The scenario reducer is intentionally narrow and deterministic:
 
-The prototype includes:
+- Vague meal input records that lunch occurred and asks for one useful detail; it does not invent calories or protein.
+- Only the exact declared `House Dal v1 with rice and yogurt` fixture returns its labeled synthetic range; prefixes and added context do not.
+- Pain, urgent-demo phrases, prescription changes, and drug–drug questions block or route out instead of generating a product verdict.
+- Active pain and urgent blocks are absorbing until their source record is corrected or undone. A later clear-demo check cannot bypass them.
+- A declared unexpected-dose or possible-side-effect event remains the primary Today handoff instead of disappearing behind the routine plan.
+- Lower-priority fixture effects are retained behind an open handoff without replacing its response; if the handoff is later corrected, the deferred effect becomes active with its original reasoning attached.
+- Supplement questions never imply a live safety check, authorization, queue, or result.
+- Unmatched wording is retained without endorsing the existing plan and repeats the urgent/new/severe/worsening human-care boundary; the exact-match demo set is not a safety classifier.
+- Corrections can target any active history record, preserve and supersede the original, explicitly report removed effects, and recalculate the session without inventing replacement facts. The latest check-in can be undone.
+- A bare correction label cannot supersede a record. An explicit voluntary Pause survives later caution or protective gates and returns after the controlling record is corrected, so the preview never silently resumes loaded training.
+- The scenario uses a deterministic synthetic Friday clock. The labeled simulation prompt advances it from 12:18 PM to the 3:45 PM pre-session phase; records never mix the fixture with the machine clock.
 
-- **Now:** a Friday-midday shift brief driven by what is known, what is missing, and what is scheduled next.
-- **Conversation:** one continuous intake for food, sleep, training, medication, symptoms, photos, documents, corrections, and questions.
-- **Recommendations:** interactive dummy reasoning that updates the live plan for meals, fatigue, training, symptoms, and supplement research.
-- **Review:** training, nutrition, body/aesthetic, mood/focus, and medication records with explicit evidence labels, confound gates, comparable windows, and refused claims.
-- **Plan:** natural variations and low-risk routines with targets, review points, confounds, and stop boundaries.
-- **Evidence:** personal learning, movement and meal references, evidence language, and an integration-ready Examine Connect source contract.
-- **Data:** source freshness, intended private topology, exclusions, and unresolved privacy controls that block real personal ingestion.
+This reducer exists to test the product contract. It is not a health reasoning engine.
 
-All displayed records are dummy data. The interface opens as a lived-in Month 2 workspace after more than 30 days of activity. No personal health source is connected, no image or document analysis is running, and interactions are held only in browser memory. The Examine Connect adapter is implemented for the future private service, but no credential or live result is included in the prototype.
+## Run and verify
 
-## Non-negotiable boundaries
+```bash
+pnpm install
+pnpm dev --hostname 127.0.0.1 --port 3010
+```
 
-- Low-risk lifestyle and performance recommendations are allowed; diagnosis and prescriptions are not.
-- Supplement-interaction recommendations require a current authorized source result. Drug–drug and prescription-change questions route to a pharmacist or prescriber.
-- No mole, lesion, or pigmented-spot analysis. Capture/document and route to a dermatologist where appropriate.
-- No conclusion from a confounded or incomplete data window.
-- No public ingress for personal health data.
-- Therapy content is not an inference source.
-- A nutrition image estimate is an educated range, never a precise nutrient fact.
-- A body or skin photo can document visible change under a protocol; it cannot establish internal body composition, diagnose a condition, or determine whether a body is “better.”
+```bash
+pnpm test
+pnpm lint
+pnpm typecheck
+pnpm build
+```
 
-## Examine Connect
+`pnpm build` creates a static export in `out/`. `pnpm desktop:build` packages that export with Electron. Production uses the traversal-safe `app://ashwini/` origin so root-relative Next.js assets and the three routes resolve correctly without a local server.
 
-[`lib/examine-connect.ts`](lib/examine-connect.ts) defines the private-service adapter for Examine Connect’s supplement–drug and supplement–supplement interaction endpoint. Configure `EXAMINE_CONNECT_API_KEY` only on the private service; the static client must never receive it. The adapter intentionally disables fetch caching. Any production cache must honor Examine’s current license and cache policy.
+## Production gates
 
-Examine Connect does not cover drug–drug interactions. Efficacy and dosing require separate licensing, so the product must not present the safety endpoint as a general medical-research API.
+Real personal data remains blocked until the product has verified canonical storage, schema migration, retention and deletion, backup/recovery, source provenance, provider disclosure, and private-network behavior. The existing Electron encrypted-state bridge is a dormant v1 scaffold and is not connected to this interface.
+
+[`lib/examine-connect.ts`](lib/examine-connect.ts) is a future private-service adapter for supplement–drug and supplement–supplement safety interactions. Its credential must never enter the static renderer. Examine Connect does not cover drug–drug interactions, and the prototype performs no live query.

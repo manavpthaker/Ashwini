@@ -1,8 +1,8 @@
 # ashwini Product Requirements Document
 
-**Status:** Product direction revised; conversational advisor prototype authorized
+**Status:** Check-in-led multidisciplinary advisor direction approved; synthetic prototype authorized
 
-**Version:** 0.4
+**Version:** 0.5
 
 **Working domain:** `ashwini.health`
 **Audience:** One person—the owner of the data and the decision-maker
@@ -11,7 +11,7 @@
 
 ashwini is a private, single-subject health advisor and contextual learning system.
 
-It behaves like one continuous conversation with a team that knows the user: a practical synthesis of primary-care navigation, nutrition, training, recovery, and personal experimentation. It turns a messy stream of body, training, food, medication-adherence, questions, documents, and standardized visual data into a small number of timely recommendations and personal routines. It can form bounded working inferences and recommend low-risk, reversible actions when the evidence and the user’s history support them. It does not diagnose, prescribe, or impersonate a licensed professional.
+Each check-in gives the user one place to share what happened and receive a coordinated read from the disciplines relevant to that moment—such as primary-care navigation, nutrition, training, recovery, and personal experimentation. Ashwini may expose those contributing perspectives when useful, but when a recommendation is warranted it returns one prioritized, coordinated recommendation rather than parallel or competing answers. It turns a messy stream of body, training, food, medication-adherence, questions, documents, and standardized visual data into a small number of timely recommendations and personal routines. It can form bounded working inferences and recommend low-risk, reversible actions when the evidence and the user’s history support them. It does not diagnose, prescribe, impersonate a licensed professional, or imply that a human provider reviewed a check-in when none did.
 
 The organizing constraint is:
 
@@ -34,7 +34,7 @@ Ashwini should create a sustainable relationship:
 
 > Say what happened → get a useful read → take the next action → follow up → keep, change, or ask a specialist.
 
-Success is not the number of metrics collected or conversations produced. Success is fewer missed inputs, better decisions in the moment, a small set of routines that work for the user, and better-prepared conversations with specialists.
+Success is not the number of metrics collected or check-ins completed. Success is fewer missed inputs, better decisions in the moment, a small set of routines that work for the user, and better-prepared conversations with specialists.
 
 ## 4. Core product principles
 
@@ -52,17 +52,23 @@ The home screen answers four questions immediately: what time context am I in, w
 
 Past records, month summaries, and review tools remain available, but they do not precede the current moment. The first viewport is a shift brief, not a report.
 
-### 4.3 One conversational intake
+### 4.3 One check-in, coordinated perspectives
 
-All user-originated input begins in one conversational surface. The user may type, speak, send a photo, attach a document, tap a quick answer, or correct an earlier interpretation. Ashwini decides whether the input becomes a meal estimate, adherence event, symptom note, training result, question, task, document, or specialist-handoff item.
+All user-originated input begins in **Check-in**, one multimodal intake surface. The user may type, speak, send a photo, attach a document, tap a quick answer, or correct an earlier interpretation. Ashwini decides how to structure the input, which perspectives are relevant, and whether the result should be a record, meal estimate, adherence event, symptom note, training result, question, task, recommendation, or specialist-handoff item. The user does not need to choose a provider, domain, or form before starting.
 
-Structured forms are progressive tools inside the conversation, not separate destinations the user must understand in advance. Ashwini asks only the highest-value follow-up question and shows what it recorded or changed.
+Structured forms are progressive tools inside the check-in, not separate destinations the user must understand in advance. Ashwini asks only the highest-value follow-up question and shows what it recorded or changed.
+
+When more than one discipline matters, Ashwini reconciles the relevant perspectives into one coordinated recommendation. Concise, role-labeled perspectives may make the reasoning inspectable, but they must not become competing advice, fictional dialogue, or claims of professional review. Perspective labels describe reasoning domains—not people, credentials, or proof that separate models or licensed reviewers produced the answer.
+
+Check-ins should feel calm, attentive, specific, and humane. This bedside manner is an interaction standard, not a source of authority. Warmth must not hide uncertainty, soften a necessary route-out, or overstate confidence.
 
 ### 4.4 Bounded recommendations and specialist gates
 
 Ashwini may combine the user’s history, current plan, personal patterns, and external evidence to make recommendations in low-risk, reversible domains such as meal timing, protein and hydration habits, training volume, exercise selection, sleep routines, and whether a supplement is worth researching. It may state a working inference when it explains the facts and uncertainty behind it.
 
 Ashwini routes out urgent or escalating symptoms, diagnosis, prescription changes, drug–drug questions, pregnancy, severe supplement interactions, rehabilitation, and other decisions where a qualified professional needs to evaluate the person. A route-out should include a concise handoff and the safest immediate next step available; it should not become a generic disclaimer repeated throughout the interface.
+
+A high-priority route-out remains visible until it is explicitly corrected, acknowledged, or resolved through an authorized path. A later routine check-in must not silently clear a safety block or bury a time-sensitive handoff. Corrections retain the original record, visibly supersede its derived effects, and recalculate downstream guidance without inventing replacement facts.
 
 The persistent product status communicates the overall boundary. Recommendation details carry provenance, confidence, and escalation state on demand.
 
@@ -291,9 +297,9 @@ This makes Ashwini accountable. It can later answer whether its suggestion was u
 
 The intended PWA has three primary surfaces:
 
-1. **Now:** A time-of-day brief with the missing input, the next commitment, and the most useful recommendation. This is the default and must be useful in the first viewport.
-2. **Conversation:** The single intake and question surface. Photos, documents, confirmations, corrections, and structured follow-ups happen here in one continuous history.
-3. **Plan and Review:** Active routines, scheduled training/nutrition actions, weekly evidence-labeled summaries, paired capture comparison, and outcomes.
+1. **Today:** A time-of-day brief with the missing input, the next commitment, and the most useful recommendation. This is the default and must be useful in the first viewport.
+2. **Check-in:** The single multimodal intake and question surface. Photos, documents, confirmations, corrections, and progressive follow-ups begin here. Completed check-ins remain in an inspectable chronological record, but the interface does not imitate a chat transcript.
+3. **Plan:** Active routines, scheduled training and nutrition actions, weekly evidence-labeled reviews, paired capture comparisons, and outcomes.
 
 The **Learning layer** is accessible contextually from all three surfaces and directly through an intentional library entry point. It holds reference assets, provenance, review status, and personal notes. It is not a notification surface and does not generate personal conclusions on its own.
 
@@ -335,13 +341,13 @@ The product direction is set and the synthetic prototype may proceed. These ques
 The synthetic prototype proceeds now; real ingestion and unattended recommendation delivery remain gated. The likely sequence is:
 
 1. **Private data foundation:** Canonical storage, provenance, private network, backup/retention controls, and reliable ingest verification.
-2. **Conversation foundation:** One multimodal intake that turns free-form input into visible structured records, asks one useful follow-up, and keeps corrections.
-3. **Time-aware Now:** A morning, midday, training-window, and evening brief driven by known commitments and missing inputs.
+2. **Check-in foundation:** One multimodal intake that turns free-form input into visible structured records, selects only the relevant perspectives, asks at most one useful follow-up, returns one coordinated response when warranted, and keeps corrections.
+3. **Time-aware Today:** A morning, midday, training-window, and evening brief driven by known commitments, missing inputs, and the highest-priority current decision.
 4. **Reference and evidence foundation:** Versioned assets plus an authorized Examine Connect safety adapter with citations, grades, cache handling, and explicit coverage limits.
 5. **Baseline and training loops:** Medication-adherence logging, sustainable diet anchors, training plans, photo-assisted nutrition, confound gates, and weekly evidence-labeled review.
-5. **Micro-test support:** Declare a routine, record comparable occurrences, display uncertainty, and log outcomes.
-6. **Visual protocol:** Capture-quality enforcement, paired review, and body/skin visual-delta language only.
-7. **Additional domains:** ESM, labs, hair, and graph rendering only when their safety and evidence conditions are satisfied.
+6. **Micro-test support:** Declare a routine, record comparable occurrences, display uncertainty, and log outcomes.
+7. **Visual protocol:** Capture-quality enforcement, paired review, and body/skin visual-delta language only.
+8. **Additional domains:** ESM, labs, hair, and graph rendering only when their safety and evidence conditions are satisfied.
 
 No therapy layer, unsupported clinical interpretation, or invisible autonomous medication action belongs in the initial implementation.
 
@@ -352,7 +358,8 @@ Ashwini is working when, after a meaningful period of use, the user can point to
 - A small set of repeatable routines with a clear target and evidence status
 - At least one decision they changed because Ashwini made the conditions legible
 - A home screen that identifies the right missing input and next action for the current time of day
-- One conversational intake that successfully routes food, training, adherence, symptoms, questions, photos, and documents
+- A single Check-in surface that successfully routes food, training, adherence, symptoms, questions, photos, and documents
+- When multiple disciplines are relevant, their reasoning resolves into one prioritized recommendation without making the user reconcile competing answers
 - Recommendations that are specific enough to act on and easy to inspect for reasoning and sources
 - At least one tempting conclusion Ashwini correctly refused to make
 - Nutrition history that is useful for trends despite incomplete recipe information

@@ -1,7 +1,5 @@
-import { AshwiniAdvisor } from "@/components/ashwini-advisor";
+import { TodayScreen } from "@/components/product/today-screen";
 
 export default function Home() {
-  return (
-    <AshwiniAdvisor />
-  );
+  return <TodayScreen />;
 }
