@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      # Integration tests run against a throwaway Postgres. CI never touches the
+      # Supabase project that holds real health records.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ashwini_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      ASHWINI_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/ashwini_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # A public repo plus a NEXT_PUBLIC_* convention is one typo away from
+      # shipping a credential to the browser. Fail the build instead.
+      - name: Guard against client-exposed secrets
+        run: |
+          if grep -rnE 'NEXT_PUBLIC_[A-Z_]*(KEY|SECRET|TOKEN|PASSWORD|DATABASE|CREDENTIAL)' \
+               --include='*.ts' --include='*.tsx' --include='*.mjs' --include='*.cjs' \
+               --include='.env.example' . ; then
+            echo "::error::A NEXT_PUBLIC_ variable names a credential. Anything NEXT_PUBLIC_ is compiled into the browser bundle."
+            exit 1
+          fi
+
+      # tsconfig.json includes .next/types, which only exists after typegen.
+      # Order matters: install -> typegen -> typecheck.
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm format:check
+
+      - name: Apply migrations to the test database
+        run: pnpm db:apply
+        env:
+          DATABASE_URL: ${{ env.ASHWINI_TEST_DATABASE_URL }}
+
+      - run: pnpm test:coverage
+
+      - run: pnpm build

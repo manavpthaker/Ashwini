@@ -1,0 +1,23 @@
+.next/
+out/
+node_modules/
+release/
+dist/
+pnpm-lock.yaml
+
+# The prototype front end and its fixtures are excluded until the UI direction is
+# settled — reformatting them now would bury the redesign diff in noise.
+app/
+components/
+lib/demo-data.ts
+lib/learning.ts
+lib/app-state.ts
+
+# docs/PRD.md is the product authority. Prettier realigns its markdown tables,
+# which is pure churn on a document people read as prose.
+docs/
+
+# Electron shell and the Examine adapter: formatted when they are next edited
+# for real, not as drive-by noise in an unrelated commit.
+desktop/
+lib/examine-connect.ts
