@@ -178,6 +178,26 @@ export interface CommitmentsTable {
   decision_id: string | null;
 }
 
+export interface DosesTable {
+  dose_id: Generated<string>;
+  med_id: string;
+  scheduled_ts: Date | null;
+  taken_ts: Date | null;
+  skipped: boolean;
+  skip_reason: string | null;
+  note: string | null;
+}
+
+export interface ReminderDispatchesTable {
+  dispatch_id: Generated<string>;
+  dose_id: Immutable<string>;
+  scheduled_for: Immutable<Date>;
+  dispatched_at: Timestamp;
+  channel: Immutable<"brownbot" | "log">;
+  status: Immutable<"sent" | "failed" | "skipped">;
+  detail: Immutable<string | null>;
+}
+
 export interface InterventionsTable {
   intervention_id: Generated<string>;
   name: string;
@@ -224,4 +244,6 @@ export interface Database {
   "ashwini.commitments": CommitmentsTable;
   "ashwini.medications": MedicationsTable;
   "ashwini.interventions": InterventionsTable;
+  "ashwini.doses": DosesTable;
+  "ashwini.reminder_dispatches": ReminderDispatchesTable;
 }

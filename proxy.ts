@@ -26,8 +26,21 @@ import {
 
 const IDENTITY_HEADER = "tailscale-user-login";
 
-/** Reachable without a session: the login flow itself, and liveness. */
-const PUBLIC_PATHS = ["/login", "/api/auth/sign-in", "/api/auth/callback", "/api/health"];
+/**
+ * Reachable without a session: the login flow, liveness, and the scheduler.
+ *
+ * The scheduler has no session to present — it is a cron, not a person — so it
+ * authenticates on a shared secret inside its own handler. That handler refuses
+ * to run at all when the secret is unset, so passing it through here does not
+ * leave it open.
+ */
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth/sign-in",
+  "/api/auth/callback",
+  "/api/health",
+  "/api/reminders/run",
+];
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const config = readAuthConfig();
