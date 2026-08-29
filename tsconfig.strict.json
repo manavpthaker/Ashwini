@@ -1,0 +1,19 @@
+{
+  // The new server-side and domain code is held to a stricter bar than the
+  // prototype front end, which predates it and is being redesigned separately.
+  //
+  // `noUncheckedIndexedAccess` matters here specifically because the data layer
+  // is Record<string, …> and array-index heavy, and an undefined slipping
+  // through a confound lookup or a rule table is a safety bug, not a typo.
+  //
+  // Fold the front end in and delete this file once the redesign lands.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["domain/**/*.ts", "server/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules"]
+}
