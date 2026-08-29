@@ -1,19 +1,23 @@
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import {
+  isAllowedEmail,
+  permittedOnPublicHost,
+  publicHost,
+  readAuthConfig,
+} from "@/lib/auth/config";
 
 /**
- * The identity gate.
+ * The gate every request passes through.
  *
- * PRD 11.3 mandates no public ingress, and `tailscale serve` delivers that —
- * but "reachable only from the tailnet" is not the same as "reachable only by
- * me". Every node on a tailnet can reach port 443 on this machine, so a shared
- * tailnet (family, a work laptop, a contractor) would otherwise have the health
- * record one curl away.
+ * Two modes, chosen by what is configured (see lib/auth/config.ts):
  *
- * `tailscale serve` injects Tailscale-User-Login on proxied requests. This
- * checks it, and the tailnet ACL should independently restrict 443 on this node
- * to the owner. Bind Next to 127.0.0.1 as well, so nothing on the LAN can reach
- * the app directly and skip this check.
+ * - **supabase** — verifies a real session. Holds on any host, which is what
+ *   makes a public deployment defensible.
+ * - **tailscale** — trusts the `Tailscale-User-Login` header that
+ *   `tailscale serve` injects. Sound only where nothing else can reach the
+ *   port, so it is refused on a public host.
  *
  * Deliberately reads process.env rather than importing server/env.ts: the Next
  * docs warn that proxy runs separately from render code and should not rely on
@@ -22,62 +26,120 @@ import type { NextRequest } from "next/server";
 
 const IDENTITY_HEADER = "tailscale-user-login";
 
-/**
- * Hosts that serve traffic from the public internet.
- *
- * The identity check below reads a request header. That is only sound because
- * `tailscale serve` sets the header itself and nothing else can reach the port.
- * On a public host the same header is attacker-controlled — anyone can send
- * `Tailscale-User-Login: <the owner>` and walk straight in — so the gate would
- * be decorative while looking like security.
- *
- * Refusing to serve is therefore the only safe behaviour, and there is no
- * override flag on purpose: running publicly is not a configuration choice,
- * it is a different architecture that needs real authentication first.
- */
-function publicHost(): string | null {
-  if (process.env.VERCEL) return "Vercel";
-  if (process.env.AWS_LAMBDA_FUNCTION_NAME) return "AWS Lambda";
-  if (process.env.NETLIFY) return "Netlify";
-  return null;
-}
+/** Reachable without a session: the login flow itself, and liveness. */
+const PUBLIC_PATHS = ["/login", "/api/auth/sign-in", "/api/auth/callback", "/api/health"];
 
-export function proxy(request: NextRequest): NextResponse {
+export async function proxy(request: NextRequest): Promise<NextResponse> {
+  const config = readAuthConfig();
   const host = publicHost();
-  if (host) {
+
+  if (host && !permittedOnPublicHost(config)) {
     return deny(
-      `Ashwini refuses to serve from ${host}. PRD 11.3 requires no public ingress, and the identity header this app trusts is set by \`tailscale serve\` — on a public host any caller can forge it. Run it on the private host, or replace the header check with real authentication first.`,
+      `Ashwini refuses to serve from ${host} without real authentication. The Tailscale identity header it would otherwise trust is set by \`tailscale serve\`; on a public host any caller can forge it. Configure Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, ASHWINI_ALLOWED_EMAILS) or run it on the private host.`,
     );
   }
 
-  const expected = process.env.ASHWINI_TAILSCALE_USER;
-  const required = process.env.ASHWINI_REQUIRE_IDENTITY !== "0";
-
-  if (!required) {
+  if (config.mode === "none") {
     if (process.env.NODE_ENV === "production") {
-      // env.ts refuses to boot in this state; this is the second line of defence
-      // in case the app is started some other way.
-      return deny("The identity gate cannot be disabled in production.");
+      return deny(
+        "No authentication is configured. Set up Supabase auth, or ASHWINI_TAILSCALE_USER behind `tailscale serve`.",
+      );
     }
+    // Local development with nothing configured: let it through, but only here.
     return NextResponse.next();
   }
 
-  if (!expected) {
-    return deny("ASHWINI_TAILSCALE_USER is not configured, so no request can be authorised.");
+  if (config.mode === "supabase") {
+    return supabaseGate(request, config);
   }
 
+  return tailscaleGate(request, config);
+}
+
+async function supabaseGate(
+  request: NextRequest,
+  config: ReturnType<typeof readAuthConfig>,
+): Promise<NextResponse> {
+  if (isPublicPath(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
+  let response = NextResponse.next({ request });
+
+  const supabase = createServerClient(
+    config.supabaseUrl as string,
+    config.supabaseAnonKey as string,
+    {
+      cookies: {
+        getAll: () => request.cookies.getAll(),
+        setAll: (cookiesToSet) => {
+          // Both halves matter: the request copy so this handler sees the refreshed
+          // token, the response copy so the browser keeps it. Omitting either is the
+          // documented cause of random logouts.
+          for (const { name, value } of cookiesToSet) {
+            request.cookies.set(name, value);
+          }
+          response = NextResponse.next({ request });
+          for (const { name, value, options } of cookiesToSet) {
+            response.cookies.set(name, value, options);
+          }
+        },
+      },
+    },
+  );
+
+  // getUser(), never getSession(): getSession only reads the cookie and does not
+  // verify it, so it cannot decide whether to admit a request.
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+    return unauthenticated(request);
+  }
+
+  if (!isAllowedEmail(config, data.user.email)) {
+    // A valid Supabase user from some other project or sign-up is still not this
+    // record's owner. The allowlist is what makes this single-subject.
+    return deny("This account is not permitted to reach this record.");
+  }
+
+  return response;
+}
+
+function tailscaleGate(
+  request: NextRequest,
+  config: ReturnType<typeof readAuthConfig>,
+): NextResponse {
   const presented = request.headers.get(IDENTITY_HEADER);
+
   if (!presented) {
     return deny(
       "No Tailscale identity on this request. Reach this app through `tailscale serve`, not the port directly.",
     );
   }
 
-  if (presented.toLowerCase() !== expected.toLowerCase()) {
+  if (presented.toLowerCase() !== (config.tailscaleUser as string).toLowerCase()) {
     return deny("This tailnet identity is not permitted.");
   }
 
   return NextResponse.next();
+}
+
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
+/** An API caller wants a 401; a browser wants the login page. */
+function unauthenticated(request: NextRequest): NextResponse {
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    return new NextResponse(JSON.stringify({ error: "Not signed in." }), {
+      status: 401,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    }) as NextResponse;
+  }
+  const url = request.nextUrl.clone();
+  url.pathname = "/login";
+  url.searchParams.set("next", request.nextUrl.pathname);
+  return NextResponse.redirect(url);
 }
 
 function deny(reason: string): NextResponse {
@@ -88,7 +150,7 @@ function deny(reason: string): NextResponse {
 }
 
 export const config = {
-  // Static assets carry no health data and are requested before the identity
-  // header is useful; everything else, including every API route, is gated.
+  // Static assets carry no health data; everything else, including every API
+  // route, passes through the gate.
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { permittedOnPublicHost, publicHost, readAuthConfig } from "@/lib/auth/config";
 
 /**
  * Environment, validated once at boot.
@@ -79,32 +80,30 @@ export function env(): Env {
   const value = parsed.data;
 
   if (value.NODE_ENV === "production") {
-    // proxy.ts refuses these hosts per request; this refuses at boot, so the
-    // process never comes up holding a live DATABASE_URL on a public host.
-    const host = process.env.VERCEL
-      ? "Vercel"
-      : process.env.AWS_LAMBDA_FUNCTION_NAME
-        ? "AWS Lambda"
-        : process.env.NETLIFY
-          ? "Netlify"
-          : null;
-    if (host) {
-      throw new Error(
-        `Refusing to start on ${host}. PRD 11.3 requires no public ingress, and this app's identity gate trusts a request header that only \`tailscale serve\` can be relied on to set. See docs/PRIVACY.md.`,
-      );
-    }
-
     if (!value.DATABASE_URL) {
       throw new Error("DATABASE_URL is required in production.");
     }
-    if (value.ASHWINI_REQUIRE_IDENTITY === false) {
+
+    const auth = readAuthConfig();
+
+    if (auth.mode === "none") {
       throw new Error(
-        "ASHWINI_REQUIRE_IDENTITY=0 is refused in production. The identity gate is the only thing standing between the tailnet and the health record.",
+        "No authentication is configured. Set Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, ASHWINI_ALLOWED_EMAILS), or ASHWINI_TAILSCALE_USER behind `tailscale serve`.",
       );
     }
-    if (!value.ASHWINI_TAILSCALE_USER) {
+
+    // proxy.ts refuses per request; this refuses at boot, so the process never
+    // comes up holding a live DATABASE_URL somewhere its gate cannot hold.
+    const host = publicHost();
+    if (host && !permittedOnPublicHost(auth)) {
       throw new Error(
-        "ASHWINI_TAILSCALE_USER is required in production so proxy.ts has an identity to match.",
+        `Refusing to start on ${host} with only the Tailscale identity gate. That gate trusts a request header \`tailscale serve\` injects; on a public host any caller can forge it. Configure Supabase auth. See docs/PRIVACY.md.`,
+      );
+    }
+
+    if (auth.mode === "tailscale" && value.ASHWINI_REQUIRE_IDENTITY === false) {
+      throw new Error(
+        "ASHWINI_REQUIRE_IDENTITY=0 is refused in production. The identity gate is the only thing standing between the tailnet and the health record.",
       );
     }
   }

@@ -30,13 +30,17 @@ const nextConfig: NextConfig = {
   /**
    * Was `output: "export"`, which forbids route handlers, headers() and any
    * server code — so lib/examine-connect.ts had nowhere to run and the API
-   * surface could not exist. `standalone` emits a self-contained server for the
-   * Mac mini.
+   * surface could not exist.
    *
-   * Note: standalone does NOT copy `public/` or `.next/static`. The start
-   * script has to, or the deployed app serves no CSS. See README.
+   * `standalone` emits a self-contained server, which is what a self-hosted box
+   * wants. Vercel builds its own output and does not want it, so this is left
+   * unset there — a stale project "Output Directory" plus an unexpected output
+   * mode is the likeliest cause of a failed Vercel build.
+   *
+   * Note: standalone does NOT copy `public/` or `.next/static`. A self-hosted
+   * start script has to, or the deployed app serves no CSS. See README.
    */
-  output: "standalone",
+  ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
   reactStrictMode: true,
   turbopack: {
     root: __dirname,

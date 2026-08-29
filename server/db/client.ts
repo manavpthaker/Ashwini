@@ -7,18 +7,28 @@ import type { Database } from "./types";
 /**
  * The one Postgres connection for the process.
  *
- * Connect through Supavisor **session mode** (port 5432 on the Supabase pooler
- * host). Two reasons, both practical:
+ * Which Supavisor port to use depends on where this runs, and getting it wrong
+ * is the classic Supabase failure mode:
  *
- *   - Supabase direct connections are IPv6-only unless the IPv4 add-on is on,
- *     and a home Mac mini may not have working IPv6.
- *   - Port 6543 is transaction mode, meant for serverless. This is a long-lived
- *     Node process, so session mode is the right shape.
+ * - **Serverless (Vercel):** transaction mode, **port 6543**. Each invocation is
+ *   potentially a fresh process, so an application-level pool is destroyed on
+ *   exit and pooling has to happen upstream. Keep `max` at 1 — many concurrent
+ *   instances each holding several connections is how you exhaust the pool.
+ * - **A long-lived process (the Mac mini):** session mode, **port 5432**, with a
+ *   small local pool. Also the IPv4-compatible option, which matters because
+ *   Supabase direct connections are IPv6-only without the add-on.
  *
- * The pool is small on purpose: one user, one app, and a pooler in front of it.
+ * Transaction mode does not support named prepared statements. node-postgres
+ * only creates those when a query is given a `name`, and Kysely does not, so
+ * this combination is safe as written — but a future raw query that names a
+ * statement would break on 6543 only, and never locally.
  */
 
 let instance: Kysely<Database> | null = null;
+
+function isServerless(): boolean {
+  return Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+}
 
 export function db(): Kysely<Database> {
   if (instance) return instance;
@@ -34,8 +44,9 @@ export function db(): Kysely<Database> {
     dialect: new PostgresDialect({
       pool: new Pool({
         connectionString: DATABASE_URL,
-        max: 5,
-        idleTimeoutMillis: 30_000,
+        // One connection per serverless instance; a small pool on a real process.
+        max: isServerless() ? 1 : 5,
+        idleTimeoutMillis: isServerless() ? 10_000 : 30_000,
         connectionTimeoutMillis: 10_000,
         // Supabase terminates TLS with a public CA; the default verification is
         // correct here. Do not disable it to silence a certificate error.
