@@ -39,16 +39,25 @@ ASHWINI_ALLOW_SEED=1 pnpm db:seed   # optional synthetic development data
 pnpm dev
 ```
 
-See [`.env.example`](.env.example) for configuration. Two things matter more than the rest:
+See [`.env.example`](.env.example) for configuration.
 
-- Connect to Supabase through the **Supavisor session-mode pooler on port 5432**. Direct connections are IPv6-only without the IPv4 add-on, and port 6543 is transaction mode, meant for serverless rather than a long-lived process.
-- Reach the app through `tailscale serve`, never `tailscale funnel`. Funnel is public ingress and PRD §11.3 forbids it.
+## Deploying
 
-`pnpm build` emits a standalone server. It does **not** copy `public/` or `.next/static`, so a deployment script has to:
+The app runs in one of two shapes, and the identity gate picks the right one from what you configure — there is no mode flag.
+
+**Vercel (the current deployment).** Requires Supabase auth: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `ASHWINI_ALLOWED_EMAILS`. The app **refuses to start** on a public host without them, and there is no override — the alternative gate reads a header that only `tailscale serve` can be trusted to set, and on a public host any caller can forge it.
+
+- Use the **transaction-mode pooler, port 6543**. Each serverless invocation may be a fresh process, so pooling has to happen upstream; the pool is capped at one connection per instance.
+- `output: "standalone"` is deliberately not set on Vercel. Vercel builds its own output, and forcing standalone alongside a stale project "Output Directory" is what broke the first deployments here.
+- [`vercel.json`](vercel.json) runs the reminder scheduler every 15 minutes. This is what satisfies PRD §11.8 — reminders fire whether or not any machine at home is awake — and it needs `ASHWINI_CRON_SECRET`.
+
+**Private host (Mac mini).** Set `ASHWINI_TAILSCALE_USER` instead, reach it through `tailscale serve`, and bind to `127.0.0.1`. Never `tailscale funnel`. Use the **session-mode pooler, port 5432** — also the IPv4-friendly option, since Supabase direct connections are IPv6-only without the add-on. Here `pnpm build` emits a standalone server, which does **not** copy `public/` or `.next/static`:
 
 ```bash
 cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/
 ```
+
+Migrations always use the session-mode or direct URL, never 6543.
 
 Integration tests need a throwaway Postgres and are skipped without one:
 
@@ -88,7 +97,7 @@ Every record it displays is dummy data. It opens as a lived-in Month 2 workspace
 - Supplement-interaction recommendations require a current authorized source result. Drug–drug and prescription-change questions route to a pharmacist or prescriber.
 - No mole, lesion, or pigmented-spot analysis. Capture/document and route to a dermatologist where appropriate.
 - No conclusion from a confounded or incomplete data window.
-- No public ingress to the application. Canonical storage is a disclosed managed processor — see [`docs/PRIVACY.md`](docs/PRIVACY.md) and PRD §4.8, which was amended in v0.5 when storage moved off the Mac mini.
+- Access is gated by a verified session on an explicit allowlist, never by network position. The app refuses to run on a public host without it. Storage and hosting are both disclosed managed processors — see [`docs/PRIVACY.md`](docs/PRIVACY.md) and PRD §4.8, amended in v0.5 when storage moved off the Mac mini and again in v0.6 when the app itself did.
 - Therapy content is not an inference source.
 - A nutrition image estimate is an educated range, never a precise nutrient fact.
 - A body or skin photo can document visible change under a protocol; it cannot establish internal body composition, diagnose a condition, or determine whether a body is “better.”

@@ -13,31 +13,49 @@ records are not, and must never be committed to it.
 
 | | |
 |---|---|
-| **Application** | One Node process on the private host. No public ingress. |
+| **Application** | Vercel (managed hosting), publicly reachable |
 | **Canonical records** | Supabase (managed Postgres), `ashwini` schema |
 | **Capture images and documents** | Supabase Storage, private buckets |
-| **Reachability** | Tailscale only, via `tailscale serve` |
+| **Access** | A verified session on an explicit allowlist |
+| **Scheduled work** | Vercel Cron |
 
-This is an amendment to the PRD's original topology, in which the Mac mini held
-canonical data. See PRD §4.8 (v0.5) for the reasoning and the trade accepted.
+Two amendments moved this away from the PRD's original topology: v0.5 moved
+canonical data off the Mac mini, and v0.6 moved the application itself onto
+public hosting. See PRD §4.8 for both, and the trade accepted in each.
 
-**Supabase is a data processor.** Personal health records rest on their
-infrastructure, subject to their encryption at rest and their operational
-access. That is the cost of managed backups and recovery, and it is disclosed
-here rather than buried.
+**A private deployment is still fully supported.** Running on the Mac mini
+behind `tailscale serve` needs no code change — the identity gate switches mode
+on what is configured. The controls below describe the hosted deployment, which
+is the stricter case.
+
+**There are two processors, not one.** Supabase holds the records; Vercel runs
+the code that reads them and therefore sees them in memory and in logs. Both are
+subject to their own encryption, retention, and operational access. That is the
+cost of managed backups, availability, and a scheduler that fires whether or not
+a machine at home is awake — disclosed here rather than buried.
 
 ## Access control
 
-Three independent layers, because "no public ingress" is not "no access":
+Three independent layers. The application is publicly reachable, so these are
+the whole of the protection — there is no network position doing quiet work
+behind them:
 
-1. **Network.** `tailscale serve` terminates TLS and admits only tailnet
-   traffic. `tailscale funnel` is **prohibited** — it is public ingress and
-   violates PRD §11.3. The application binds to `127.0.0.1`, so nothing on the
-   local network can reach it directly and bypass the layers below.
-2. **Identity.** `proxy.ts` requires a `Tailscale-User-Login` header matching
-   `ASHWINI_TAILSCALE_USER` on every request. Every node on a tailnet can reach
-   the host; a shared tailnet would otherwise put the record one request away.
-   The tailnet ACL should independently restrict port 443 on this node.
+1. **Session.** Every request must carry a Supabase session, verified with
+   `getUser()` — never `getSession()`, which only reads the cookie without
+   validating it and so cannot decide whether to admit anyone. Sign-in is a
+   magic link with `shouldCreateUser: false`: there is no sign-up here, only the
+   owner signing in.
+2. **Allowlist.** A verified session is not enough. The address must appear in
+   `ASHWINI_ALLOWED_EMAILS`, because any account able to sign in to the same
+   Supabase project would otherwise be admitted. The allowlist is what makes
+   this single-subject, and the app treats an empty one as "no auth configured"
+   rather than "allow everyone".
+
+   *On a private deployment* these two are replaced by the tailnet identity
+   header, which is sound **only** because `tailscale serve` injects it and
+   nothing else can reach the port. The application refuses that mode on a
+   public host, with no override.
+
 3. **Database.** Health tables live in the `ashwini` schema, not `public`.
    Supabase serves `public` over PostgREST at a public URL, so schema isolation
    is a real control and not tidiness. The schema must **not** be added to the
@@ -47,8 +65,9 @@ Three independent layers, because "no public ingress" is not "no access":
 
 ## Encryption
 
-- **In transit:** TLS to the application (Tailscale-issued certificate) and TLS
-  to Supabase. Certificate verification is never disabled.
+- **In transit:** TLS to the application (Vercel-managed, or Tailscale-issued on
+  a private deployment) and TLS to Supabase. Certificate verification is never
+  disabled.
 - **At rest:** Supabase-managed encryption for database and storage.
 - **Backups:** encrypted at rest on the backup volume (see below).
 - **Device:** FileVault on the Mac mini.
@@ -114,21 +133,37 @@ is what keeps rule-era records from being silently reinterpreted by a model.
   and routed to dermatology, never analysed. `dermatology_handoffs` holds the
   user's own wording and deliberately has no assessment field.
 
+## Time-critical reminders
+
+PRD §11.8 requires that critical dose reminders not depend on a single machine.
+Hosted deployment answers this directly: Vercel Cron fires the scheduler
+regardless of whether the Mac mini is awake or the tailnet is reachable. This
+was the main thing the private-only topology could not deliver, and it is a
+large part of why v0.6 accepted public hosting.
+
+Reminder metadata — that a dose is due, and which medication — reaches the
+delivery channel by necessity. Choosing that channel is choosing another
+processor, and it belongs in this document once one is wired.
+
+Two properties hold regardless of channel:
+
+- A dose already taken, skipped, or reminded about is never reminded again, and
+  the `(dose_id, scheduled_for)` unique constraint enforces that rather than
+  application care.
+- An undelivered reminder is recorded as failed, never as sent. A delivery that
+  did not happen must not read as one.
+
 ## Unresolved
 
 Honest gaps, not oversights:
 
-1. **Time-critical medication reminders.** PRD §11.8 requires these not to
-   depend solely on one machine, and §7.3 wants a reliable native iOS mechanism.
-   A PWA cannot provide one: the web has no scheduled local notification, so a
-   reminder must be pushed — meaning the host must be awake and must reach
-   Apple's push service, which puts reminder metadata outside the private
-   network. iOS web push also drops subscriptions across device restarts. Either
-   a companion mechanism owns dose reminders, or the product states that it does
-   not deliver them.
-2. **Key recovery.** Encryption at rest is the processor's; there is no
+1. **Key recovery.** Encryption at rest is the processor's; there is no
    documented recovery path for the independent backup volume's key.
-3. **Capture-image lifecycle.** Signed-URL expiry, retention, and deletion for
+2. **Capture-image lifecycle.** Signed-URL expiry, retention, and deletion for
    Supabase Storage objects are not yet specified.
-4. **Restore rehearsal.** Not yet performed. Until it is, the backup story is
+3. **Restore rehearsal.** Not yet performed. Until it is, the backup story is
    theoretical.
+4. **Reminder delivery channel.** The scheduler runs and the dispatch log is
+   append-only, but no channel is wired yet. The placeholder records
+   `status: "failed"` rather than `"sent"`, so an undelivered reminder is
+   visible rather than silently marked delivered.

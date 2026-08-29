@@ -1,8 +1,8 @@
 # ashwini Product Requirements Document
 
-**Status:** Product direction revised; conversational advisor prototype authorized; storage topology amended in §4.8 and §11.3
+**Status:** Product direction revised; conversational advisor prototype authorized; storage topology amended in §4.8 and §11.3 (v0.5); hosting and access model amended in §4.8 and §11.3 (v0.6)
 
-**Version:** 0.5
+**Version:** 0.6
 
 **Working domain:** `ashwini.health`
 **Audience:** One person—the owner of the data and the decision-maker
@@ -94,6 +94,8 @@ Fast outcomes—such as a workout’s completion, a simple adherence behavior, o
 
 ### 4.8 Privacy is a product property
 
+> **The paragraph below is the original v0.4 text, kept for the record. Its topology claims are superseded by the v0.5 and v0.6 amendments that follow it; its requirements are not.**
+
 The default topology remains private: the iPhone captures; a private Mac mini service runs the application and its scheduled work; Obsidian, if used, is rendered output rather than the source of truth. There is no public ingress to the application. The implementation must define encryption, backup, retention, access controls, offline-data handling, and model-provider disclosure before personal data is ingested.
 
 **Amendment, v0.5 — canonical storage is a managed service.** Earlier versions placed canonical data on the Mac mini itself. Canonical records now live in a managed Postgres (Supabase), which changes the privacy claim in a way that has to be stated plainly rather than absorbed silently:
@@ -104,6 +106,17 @@ The default topology remains private: the iPhone captures; a private Mac mini se
 - Because the record is no longer solely ours, the controls in [`docs/PRIVACY.md`](PRIVACY.md) — schema isolation, deny-by-default row-level security, independent encrypted backups, and a rehearsed restore — are load-bearing rather than best practice.
 
 Self-hosting the same stack on the Mac mini restores sole custody without changing the application, and remains available if the trade above stops looking worthwhile.
+
+**Amendment, v0.6 — the application is publicly hosted, and authentication is what protects it.** v0.5 still claimed the application itself was reachable only over the private network. It is now deployed on managed hosting (Vercel) and reachable from the internet. This reverses the load-bearing assumption of every earlier version, so it is stated rather than implied:
+
+- **The protection is authentication, not network position.** Earlier versions leaned on unreachability: nothing could get to the app, so what stood in front of it mattered less. That is no longer true, and a gate that was adequate behind a private network is not adequate on a public one.
+- Concretely, the previous gate read an identity header injected by `tailscale serve`. On a public host that header is supplied by the caller and proves nothing. Anything relying on network position for its trust has to be re-examined against this amendment, not grandfathered.
+- Access now requires a verified session belonging to an address on an explicit allowlist. Both halves matter: a session proves *someone* signed in, the allowlist is what keeps this single-subject.
+- The application refuses to start on a public host unless that authentication is configured, and there is no override for it. A private-network deployment remains fully supported and needs no change.
+- What is gained is availability. The record is reachable when the Mac mini is asleep or the tailnet is unreachable, and a hosted scheduler can fire time-critical work — which is what finally answers §11.8 without a companion device.
+- What is accepted is a larger attack surface and a second processor. Both are disclosed in [`docs/PRIVACY.md`](PRIVACY.md).
+
+This is a genuine loosening of §11.3 as originally written, made deliberately in exchange for availability and reminder reliability. It is not a reinterpretation of the original intent.
 
 ### 4.9 Knowledge is an asset, not an inference
 
@@ -312,7 +325,7 @@ Graph browsing and rich historical exploration belong in rendered private notes/
 
 1. Ashwini may infer and recommend within low-risk, reversible lifestyle and performance domains; it does not diagnose or prescribe.
 2. Photos remain private except for the minimum specific paired images required for an explicitly authorized analysis.
-3. No public ingress to the application; the private-network architecture is mandatory. Canonical storage is a named managed processor under §4.8, reached only by the application over an authenticated connection. Public exposure of the application — a tunnel, a funnel, a port forward — is prohibited outright.
+3. Access is gated by verified identity, not by network position (amended v0.6; see §4.8). Every request must carry a verified session belonging to an address on an explicit allowlist. The application must refuse to run on any publicly reachable host where that verification is not configured, with no override. Canonical storage is a named managed processor under §4.8, reached only by the application over an authenticated connection. A private-network deployment remains fully supported; where one is used, the private path is an additional layer and never a substitute for the identity check.
 4. Moles, lesions, and pigmented spots are never analyzed.
 5. No verdict is issued for a blocked/confounded window.
 6. Prescription medication is never an experimental variable.
