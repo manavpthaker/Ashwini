@@ -1,8 +1,8 @@
 # ashwini Product Requirements Document
 
-**Status:** Product direction revised; conversational advisor prototype authorized
+**Status:** Product direction revised; conversational advisor prototype authorized; storage topology amended in §4.8 and §11.3
 
-**Version:** 0.4
+**Version:** 0.5
 
 **Working domain:** `ashwini.health`
 **Audience:** One person—the owner of the data and the decision-maker
@@ -94,7 +94,16 @@ Fast outcomes—such as a workout’s completion, a simple adherence behavior, o
 
 ### 4.8 Privacy is a product property
 
-The default topology remains private: the iPhone captures; a private Mac mini service holds canonical data and handles scheduled work; Obsidian, if used, is rendered output rather than the source of truth. There is no public ingress. The implementation must define encryption, backup, retention, access controls, offline-data handling, and model-provider disclosure before personal data is ingested.
+The default topology remains private: the iPhone captures; a private Mac mini service runs the application and its scheduled work; Obsidian, if used, is rendered output rather than the source of truth. There is no public ingress to the application. The implementation must define encryption, backup, retention, access controls, offline-data handling, and model-provider disclosure before personal data is ingested.
+
+**Amendment, v0.5 — canonical storage is a managed service.** Earlier versions placed canonical data on the Mac mini itself. Canonical records now live in a managed Postgres (Supabase), which changes the privacy claim in a way that has to be stated plainly rather than absorbed silently:
+
+- The application remains reachable only over the private network. Nothing about this amendment opens ingress.
+- Health records leave the private network and rest on third-party infrastructure. Supabase becomes a named data processor and must be disclosed as one.
+- The trade accepted here is operational: managed backups, patching, and point-in-time recovery, against the loss of sole physical custody. For a single-subject record that must survive a failed disk in a home office, that trade is deliberate, not incidental.
+- Because the record is no longer solely ours, the controls in [`docs/PRIVACY.md`](PRIVACY.md) — schema isolation, deny-by-default row-level security, independent encrypted backups, and a rehearsed restore — are load-bearing rather than best practice.
+
+Self-hosting the same stack on the Mac mini restores sole custody without changing the application, and remains available if the trade above stops looking worthwhile.
 
 ### 4.9 Knowledge is an asset, not an inference
 
@@ -303,7 +312,7 @@ Graph browsing and rich historical exploration belong in rendered private notes/
 
 1. Ashwini may infer and recommend within low-risk, reversible lifestyle and performance domains; it does not diagnose or prescribe.
 2. Photos remain private except for the minimum specific paired images required for an explicitly authorized analysis.
-3. No public ingress; the private-network architecture is mandatory.
+3. No public ingress to the application; the private-network architecture is mandatory. Canonical storage is a named managed processor under §4.8, reached only by the application over an authenticated connection. Public exposure of the application — a tunnel, a funnel, a port forward — is prohibited outright.
 4. Moles, lesions, and pigmented spots are never analyzed.
 5. No verdict is issued for a blocked/confounded window.
 6. Prescription medication is never an experimental variable.
