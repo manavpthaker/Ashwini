@@ -99,35 +99,8 @@ export function assertPermitted(
   gate: GateOutcome,
   level: LadderLevel,
 ): void {
-  const allowed = LEVELS_BY_STATUS[status];
-  if (!allowed.includes(level)) {
-    throw new EvidenceViolation(
-      `Status "${status}" cannot sit at ladder level ${level} (allowed: ${allowed.join(", ")}).`,
-    );
-  }
-
-  // PRD 11.5: a blocked window explains itself or routes out. It never concludes.
-  if (gate === "blocked" && status !== "unusable" && status !== "route_out") {
-    throw new EvidenceViolation(
-      `A blocked window permits only "unusable" or "route_out", not "${status}".`,
-    );
-  }
-
-  // A caveated window may still carry a low-risk recommendation (PRD 8, outcome 2),
-  // but naming uncertainty and then declaring a pattern is exactly the move 4.6 forbids.
-  if (gate === "caveated" && VERDICT_STATUSES.includes(status)) {
-    throw new EvidenceViolation(
-      `A caveated window cannot support "${status}"; the comparison is not clean.`,
-    );
-  }
-
-  // PRD 5: a Level 4 personal-comparison result requires both a verdict-grade
-  // status and an uncontaminated window.
-  if (level === 4 && gate !== "clear") {
-    throw new EvidenceViolation(
-      `Level 4 is a personal comparison result and requires a clear gate, not "${gate}".`,
-    );
-  }
+  const violation = violationOf(status, gate, level);
+  if (violation !== null) throw new EvidenceViolation(violation);
 }
 
 /** Non-throwing form, for callers choosing between candidate outputs. */
@@ -136,13 +109,46 @@ export function isPermitted(
   gate: GateOutcome,
   level: LadderLevel,
 ): boolean {
-  try {
-    assertPermitted(status, gate, level);
-    return true;
-  } catch (error) {
-    if (error instanceof EvidenceViolation) return false;
-    throw error;
+  return violationOf(status, gate, level) === null;
+}
+
+/**
+ * The rules themselves, as a description rather than a throw, so that asking
+ * and asserting share one implementation and neither uses exceptions for
+ * control flow.
+ *
+ * Returns the reason the combination is forbidden, or null if it is allowed.
+ */
+function violationOf(status: EvidenceStatus, gate: GateOutcome, level: LadderLevel): string | null {
+  const allowed = LEVELS_BY_STATUS[status];
+  if (!allowed.includes(level)) {
+    return `Status "${status}" cannot sit at ladder level ${level} (allowed: ${allowed.join(", ")}).`;
   }
+
+  // PRD 11.5: a blocked window explains itself or routes out. It never concludes.
+  if (gate === "blocked" && status !== "unusable" && status !== "route_out") {
+    return `A blocked window permits only "unusable" or "route_out", not "${status}".`;
+  }
+
+  // A caveated window may still carry a low-risk recommendation (PRD 8, outcome 2),
+  // but naming uncertainty and then declaring a pattern is exactly the move 4.6 forbids.
+  if (gate === "caveated" && VERDICT_STATUSES.includes(status)) {
+    return `A caveated window cannot support "${status}"; the comparison is not clean.`;
+  }
+
+  // PRD 5: a Level 4 personal-comparison result requires both a verdict-grade
+  // status and an uncontaminated window.
+  //
+  // Unreachable today — the two checks above already catch every level-4 status
+  // on a non-clear gate. It stays as defence in depth: it states the rule
+  // independently of VERDICT_STATUSES, so adding a level-4 entry to
+  // LEVELS_BY_STATUS without adding it there is still caught.
+  /* v8 ignore next 3 */
+  if (level === 4 && gate !== "clear") {
+    return `Level 4 is a personal comparison result and requires a clear gate, not "${gate}".`;
+  }
+
+  return null;
 }
 
 export function isEvidenceStatus(value: unknown): value is EvidenceStatus {

@@ -13,6 +13,7 @@
 
 import type { Rule, RuleOutcome } from "../rule";
 import { mentionedMedications } from "../rule";
+import { formatList } from "../../text";
 
 const CRISIS =
   /\b(suicid\w*|kill myself|killing myself|end my life|ending my life|want to die|wanna die|don'?t want to (be here|live)|self.?harm|harm myself|hurt myself|cut myself|overdose on purpose|take all my pills)\b/;
@@ -180,7 +181,7 @@ export const drugDrugRule: Rule = {
       decisionType: "route_out",
       route: "pharmacist",
       reply: reply(
-        `This is a drug–drug question about ${formatList(named)}, and it goes to your pharmacist. My only licensed interaction source is Examine Connect, which covers supplement–drug and supplement–supplement safety and explicitly does not cover drug–drug. A pharmacist can check this against your full list in minutes and it's free. I've recorded the question so you don't have to retype it.`,
+        `This is a drug–drug question about ${formatList(named, "your medications")}, and it goes to your pharmacist. My only licensed interaction source is Examine Connect, which covers supplement–drug and supplement–supplement safety and explicitly does not cover drug–drug. A pharmacist can check this against your full list in minutes and it's free. I've recorded the question so you don't have to retype it.`,
         "Pharmacist handoff · outside Examine coverage",
       ),
       records: [{ kind: "medication_event", text: context.input.utterance.text }],
@@ -247,13 +248,6 @@ export const therapyRule: Rule = {
     gated: false,
   }),
 };
-
-function formatList(items: readonly string[]): string {
-  if (items.length === 0) return "your medications";
-  if (items.length === 1) return items[0] as string;
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
-}
 
 /** In pipeline order. Do not reorder without reading tests/domain/advisor/order.test.ts. */
 export const safetyRules: readonly Rule[] = [

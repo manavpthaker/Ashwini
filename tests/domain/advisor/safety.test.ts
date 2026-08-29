@@ -27,9 +27,9 @@ describe("rule order", () => {
       "therapy-content",
       "supplement-interaction",
       "symptom-msk",
+      "medication",
       "nutrition",
       "training-volume",
-      "medication",
       "fallback",
     ]);
   });

@@ -27,6 +27,7 @@ export {
   RULE_PIPELINE,
   createRulesAdvisor,
   respondSync,
+  runPipeline,
 } from "./rules-advisor";
 
 export { safetyRules } from "./rules/safety";

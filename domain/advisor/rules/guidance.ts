@@ -10,6 +10,7 @@
 
 import type { Rule, RuleContext } from "../rule";
 import { containsWord } from "../rule";
+import { formatList } from "../../text";
 
 const KNOWN_SUPPLEMENTS = [
   "creatine",
@@ -116,7 +117,7 @@ export const supplementInteractionRule: Rule = {
         decisionType: "data_quality_block",
         route: null,
         reply: {
-          text: `I can't answer that safely yet. A supplement recommendation needs a current interaction check against everything you're already taking, and I don't have one${supplements.length > 0 ? ` covering ${formatList(supplements)}` : ""}. I've queued the check — no result means no answer, not a quiet all-clear.`,
+          text: `I can't answer that safely yet. A supplement recommendation needs a current interaction check against everything you're already taking, and I don't have one${supplements.length > 0 ? ` covering ${formatList(supplements, "these items")}` : ""}. I've queued the check — no result means no answer, not a quiet all-clear.`,
           kind: "question",
           receipt: "Blocked · no current authorized interaction result",
         },
@@ -152,7 +153,7 @@ export const supplementInteractionRule: Rule = {
       },
       records: [],
       followUp: null,
-      confidenceNote: `Based on a current ${fresh.provider} result for ${formatList(fresh.items)}.`,
+      confidenceNote: `Based on a current ${fresh.provider} result for ${formatList(fresh.items, "these items")}.`,
       refused:
         "Ashwini will not extend this result to drug–drug interactions, efficacy, or dosing.",
       choices: ["Add it and track", "Hold off", "Do nothing"],
@@ -300,19 +301,18 @@ export const fallbackRule: Rule = {
   }),
 };
 
-function formatList(items: readonly string[]): string {
-  if (items.length === 0) return "these items";
-  if (items.length === 1) return items[0] as string;
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
-}
-
-/** In pipeline order, below every safety rule. */
+/**
+ * In pipeline order, below every safety rule.
+ *
+ * `medication` sits above `nutrition` deliberately. PRD 7.3 treats adherence as
+ * a protected record, and messages routinely mention both ("took my sertraline
+ * with breakfast") — filing that as a meal would lose the dose event.
+ */
 export const guidanceRules: readonly Rule[] = [
   supplementInteractionRule,
   musculoskeletalRule,
+  medicationRule,
   nutritionRule,
   recoveryRule,
-  medicationRule,
   fallbackRule,
 ];

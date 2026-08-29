@@ -42,9 +42,20 @@ export function createRulesAdvisor(version: string = RULES_ADVISOR_VERSION): Adv
 }
 
 export function respondSync(input: AdvisorInput): AdvisorOutput {
+  return runPipeline(RULE_PIPELINE, input);
+}
+
+/**
+ * The pipeline itself, with the rule list injected.
+ *
+ * Exported so tests can drive it with a synthetic rule and prove the invariants
+ * hold for outputs the current rule set cannot produce — a level-4 verdict on a
+ * caveated window, say. Production callers use `respondSync`.
+ */
+export function runPipeline(rules: readonly Rule[], input: AdvisorInput): AdvisorOutput {
   const context = { input, text: normalize(input.utterance.text) };
 
-  const rule = RULE_PIPELINE.find((candidate) => candidate.matches(context));
+  const rule = rules.find((candidate) => candidate.matches(context));
   if (!rule) {
     // fallbackRule matches everything, so this is unreachable unless the
     // pipeline is edited into an unsafe state. Fail loudly rather than silently.
