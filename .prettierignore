@@ -21,3 +21,4 @@ docs/
 # for real, not as drive-by noise in an unrelated commit.
 desktop/
 lib/examine-connect.ts
+coverage/

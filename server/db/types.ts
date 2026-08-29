@@ -17,7 +17,10 @@ import type { DecisionType, MessageKind, RouteDestination } from "@/domain/advis
  */
 
 type Timestamp = ColumnType<Date, Date | string | undefined, never>;
+/** Write-once and never updated. */
 type Immutable<T> = ColumnType<T, T, never>;
+/** Write-once, never updated, and optional on insert because the column has a default. */
+type ImmutableDefault<T> = ColumnType<T, T | undefined, never>;
 
 export interface MessagesTable {
   message_id: Generated<string>;
@@ -45,13 +48,13 @@ export interface DecisionsTable {
   confidence_note: Immutable<string>;
   gate_outcome: Immutable<GateOutcome>;
   gate_reason: Immutable<string>;
-  confounds_checked: Immutable<unknown>;
+  confounds_checked: ImmutableDefault<unknown>;
   window_start: Immutable<Date | null>;
   window_end: Immutable<Date | null>;
-  source_refs: Immutable<unknown>;
+  source_refs: ImmutableDefault<unknown>;
   target: Immutable<string | null>;
   expected_lag: Immutable<string | null>;
-  choices: Immutable<unknown>;
+  choices: ImmutableDefault<unknown>;
   refused: Immutable<string>;
   expires_at: Immutable<Date | null>;
   review_at: Immutable<Date | null>;
@@ -68,7 +71,7 @@ export interface DecisionResponsesTable {
   responded_ts: Timestamp;
   choice: Immutable<string>;
   note: Immutable<string | null>;
-  was_override: Immutable<boolean>;
+  was_override: ImmutableDefault<boolean>;
   override_reason: Immutable<string | null>;
 }
 
@@ -121,9 +124,9 @@ export interface DermatologyHandoffsTable {
   handoff_id: Generated<string>;
   reported_ts: Timestamp;
   user_wording: Immutable<string>;
-  routed_to: Immutable<RouteDestination>;
+  routed_to: ImmutableDefault<RouteDestination>;
   message_id: Immutable<string | null>;
-  capture_series_started: Immutable<boolean>;
+  capture_series_started: ImmutableDefault<boolean>;
 }
 
 export interface ConfoundDefinitionsTable {
@@ -153,11 +156,11 @@ export interface ExternalResultsTable {
   result_id: Generated<string>;
   provider: Immutable<string>;
   items: Immutable<string[]>;
-  query: Immutable<unknown>;
+  query: ImmutableDefault<unknown>;
   requested_ts: Timestamp;
   response: Immutable<unknown>;
   evidence_grade: Immutable<string | null>;
-  references: Immutable<unknown>;
+  references: ImmutableDefault<unknown>;
   license_note: Immutable<string | null>;
   cache_expires_at: Immutable<Date | null>;
   http_status: Immutable<number | null>;
@@ -173,6 +176,18 @@ export interface CommitmentsTable {
   detail: string | null;
   kind: "training" | "meal" | "dose" | "review" | "capture" | "other";
   decision_id: string | null;
+}
+
+export interface InterventionsTable {
+  intervention_id: Generated<string>;
+  name: string;
+  category:
+    "supplement" | "topical" | "training_block" | "diet_protocol" | "behavior" | "environmental";
+  dose: number | null;
+  unit: string | null;
+  started_at: Date;
+  stopped_at: Date | null;
+  notes: string | null;
 }
 
 export interface MedicationsTable {
@@ -208,4 +223,5 @@ export interface Database {
   "ashwini.external_results": ExternalResultsTable;
   "ashwini.commitments": CommitmentsTable;
   "ashwini.medications": MedicationsTable;
+  "ashwini.interventions": InterventionsTable;
 }

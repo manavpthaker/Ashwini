@@ -20,5 +20,5 @@ export default defineConfig([
       "@typescript-eslint/no-require-imports": "off",
     },
   },
-  globalIgnores([".next/**", "node_modules/**", "out/**", "release/**", "dist/**"]),
+  globalIgnores([".next/**", "node_modules/**", "out/**", "release/**", "dist/**", "coverage/**"]),
 ]);

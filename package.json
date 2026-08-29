@@ -8,7 +8,7 @@
     "start": "next start",
     "desktop:dev": "concurrently -k \"pnpm dev\" \"wait-on http://127.0.0.1:3000 && ASHWINI_DEV_SERVER_URL=http://127.0.0.1:3000 electron .\"",
     "desktop:build": "pnpm build && electron-builder",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "next typegen && tsc --noEmit && tsc --noEmit -p tsconfig.strict.json",
     "test": "vitest run",
     "test:watch": "vitest",
