@@ -24,3 +24,8 @@ docs/
 desktop/
 lib/examine-connect.ts
 coverage/
+
+# Vendored third-party agent skills. Reformatting someone else's MIT-licensed
+# docs to match this repo's style is churn, and it fails CI on a fresh install.
+.agents/
+.claude/skills/

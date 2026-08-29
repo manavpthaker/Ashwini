@@ -62,6 +62,15 @@ cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/
 
 Migrations always use the session-mode or direct URL, never 6543.
 
+### Supabase from an agent session
+
+[`.mcp.json`](.mcp.json) registers Supabase's hosted MCP server against project `hlykstavsipzjjmwlyou`, and `skills-lock.json` pins Supabase's own reference skills. Two things worth knowing before relying on it:
+
+- **It authenticates through a browser OAuth flow in a real terminal** (`claude`, then `/mcp` → supabase → Authenticate). It cannot be authenticated from a remote or web session, and its tools are not available to one.
+- **The URL grants write access.** `features=…database…` with no `read_only=true` means an agent can execute arbitrary SQL against the project that holds the health record. Migrations are the intended path for schema change here and are immutable once applied, so appending `&read_only=true` costs nothing most days and is the safer default; drop it deliberately when a session genuinely needs to write.
+
+The installed skill trees are gitignored — `skills-lock.json` pins them by content hash, so `npx skills add supabase/agent-skills` restores exactly those versions.
+
 ## Architecture
 
 |                                               |                                                                                                                                                                             |
