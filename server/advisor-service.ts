@@ -28,6 +28,12 @@ export interface HandleUtteranceInput {
   readonly idempotencyKey?: string;
   /** When the user captured it, which can be well before the server saw it. */
   readonly capturedAt?: Date;
+  /**
+   * The earlier user message this one corrects. PRD 4.4: a correction retains
+   * the original and visibly supersedes its effects — so this points the old
+   * message forward at the new one and deletes nothing.
+   */
+  readonly correctionOf?: string;
 }
 
 export interface HandleUtteranceResult {
@@ -107,6 +113,22 @@ export async function handleUtterance(
       .returning("message_id")
       .executeTakeFirstOrThrow();
 
+    if (input.correctionOf) {
+      // The one permitted mutation on `messages`, enforced by trigger. A
+      // correction that names a message which does not exist is a client bug,
+      // and quietly recording it as an ordinary check-in would lose the link.
+      const updated = await trx
+        .updateTable("ashwini.messages")
+        .set({ corrected_by: userMessage.message_id })
+        .where("message_id", "=", input.correctionOf)
+        .where("role", "=", "user")
+        .executeTakeFirst();
+
+      if (updated.numUpdatedRows === 0n) {
+        throw new Error("The message this corrects no longer exists.");
+      }
+    }
+
     const decisionIds: string[] = [];
     for (const decision of output.decisions) {
       const row = await trx
@@ -140,16 +162,18 @@ export async function handleUtterance(
 
     for (const record of output.records) {
       const written = await writeRecord(trx, record, now, userMessage.message_id, output);
-      if (written) {
-        await trx
-          .insertInto("ashwini.routed_records")
-          .values({
-            message_id: userMessage.message_id,
-            record_table: written.table,
-            record_id: written.id,
-          })
-          .execute();
-      }
+      await trx
+        .insertInto("ashwini.routed_records")
+        .values({
+          message_id: userMessage.message_id,
+          // A kind with no table of its own is still a record: the message is
+          // it. Skipping the row here is what used to make a medication event
+          // visible in the response and invisible after a reload.
+          record_table: written?.table ?? "messages",
+          record_id: written?.id ?? userMessage.message_id,
+          record_kind: record.kind,
+        })
+        .execute();
     }
 
     return {

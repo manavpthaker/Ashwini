@@ -2,10 +2,10 @@
   "name": "ashwini",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
     "desktop:dev": "concurrently -k \"pnpm dev\" \"wait-on http://127.0.0.1:3000 && ASHWINI_DEV_SERVER_URL=http://127.0.0.1:3000 electron .\"",
     "desktop:build": "pnpm build && electron-builder",
     "lint": "eslint . --max-warnings 0",

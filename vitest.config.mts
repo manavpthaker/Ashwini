@@ -12,14 +12,14 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.ts", "tests/**/*.test.mjs"],
     // Integration tests need a live Postgres; they opt in via ASHWINI_TEST_DATABASE_URL.
     // See tests/integration/README.md.
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
       include: ["domain/**/*.ts", "server/**/*.ts", "lib/**/*.ts"],
-      exclude: ["**/*.test.ts", "lib/demo-data.ts", "lib/learning.ts"],
+      exclude: ["**/*.test.ts", "lib/product-data.ts", "lib/learning.ts"],
       thresholds: {
         // The domain layer is pure and safety-critical, so full coverage is both
         // achievable and meaningful. Everything else is held to a lower bar on

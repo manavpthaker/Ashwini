@@ -37,6 +37,27 @@ const COMBINE =
   /\b(interact\w*|together|combine|combining|mix|mixing|alongside|at the same time|take both|both at once)\b/;
 
 /**
+ * Something medicinal is being asked about, whether or not Ashwini has it on
+ * file.
+ *
+ * The drug–drug rule used to require a name from the user's own medication list,
+ * which meant "can I take lisinopril with ibuprofen" fell through to the
+ * fallback for anyone who had not entered their medications yet — the exact
+ * question PRD 11.7 exists to route, failing open at the moment a new user is
+ * most likely to ask it.
+ *
+ * Three signals, all deliberately conservative:
+ *  - generic vocabulary ("meds", "pill", "prescription");
+ *  - the over-the-counter names people actually type;
+ *  - INN stems, the suffixes the naming system reserves for drug classes
+ *    (-pril for ACE inhibitors, -statin, -sartan, and so on). These are close to
+ *    unpronounceable as ordinary English, so matching on them over-routes far
+ *    less than missing a real interaction question would cost.
+ */
+const MEDICATION_WORD =
+  /\b(medication|medications|medicine|medicines|meds?|pill|pills|tablet|tablets|capsule|capsules|prescription|prescriptions|antibiotic\w*|painkiller\w*|nsaid|ibuprofen|advil|motrin|nurofen|tylenol|paracetamol|acetaminophen|aspirin|naproxen|aleve|antihistamine\w*|benadryl|zyrtec|claritin|melatonin|\w*(pril|sartan|olol|statin|azole|cillin|mycin|oxetine|azepam|zolam|tidine|parin|gliptin|glutide|tinib|formin|prazole))\b/;
+
+/**
  * A deliberative frame. This is what separates "can I take X with Y" (a
  * pharmacist question) from "took my X with breakfast" (an adherence log) —
  * without it, every logged dose would be routed out.
@@ -165,10 +186,15 @@ export const drugDrugRule: Rule = {
   id: "drug-drug",
   matches: (context) => {
     const named = mentionedMedications(context);
-    if (named.length === 0) return false;
     // Two of the user's own medications in one sentence is a combination question
     // whatever the phrasing.
     if (named.length >= 2) return true;
+
+    // Otherwise something medicinal has to be in play — on file or not — before
+    // an interaction frame means anything. "Can I combine these two sessions?"
+    // is not a pharmacist question.
+    if (named.length === 0 && !MEDICATION_WORD.test(context.text)) return false;
+
     if (COMBINE.test(context.text)) return true;
     return ASKING.test(context.text) && /\bwith\b/.test(context.text);
   },

@@ -2,7 +2,7 @@ import "server-only";
 import type { ColumnType, Generated } from "kysely";
 import type { Domain } from "@/domain/domains";
 import type { EvidenceStatus, GateOutcome } from "@/domain/evidence";
-import type { DecisionType, MessageKind, RouteDestination } from "@/domain/advisor";
+import type { DecisionType, MessageKind, RecordDraft, RouteDestination } from "@/domain/advisor";
 
 /**
  * The Kysely view of the tables the application currently reads and writes.
@@ -87,6 +87,8 @@ export interface RoutedRecordsTable {
   message_id: Immutable<string>;
   record_table: Immutable<string>;
   record_id: Immutable<string>;
+  /** The advisor's own RecordDraft kind, so the read path need not infer it. */
+  record_kind: Immutable<RecordDraft["kind"]>;
 }
 
 export interface MealsTable {

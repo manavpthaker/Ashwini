@@ -39,11 +39,20 @@ const nextConfig: NextConfig = {
    *
    * Note: standalone does NOT copy `public/` or `.next/static`. A self-hosted
    * start script has to, or the deployed app serves no CSS. See README.
+   *
+   * `trailingSlash: true` went with `output: "export"` — a static export writes
+   * `check-in/index.html`, so the links had to carry the slash. Served by a real
+   * server the slash is a liability: it makes `/api/conversation` a 308 to
+   * `/api/conversation/` on every request, which is a redirect a POST has to
+   * survive for no benefit. The links dropped their slashes instead.
    */
   ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
   reactStrictMode: true,
   turbopack: {
-    root: __dirname,
+    // `import.meta.dirname`, not `__dirname`: package.json now declares
+    // `"type": "module"`, so this file is evaluated as ESM and `__dirname`
+    // does not exist there.
+    root: import.meta.dirname,
   },
   async headers() {
     return [

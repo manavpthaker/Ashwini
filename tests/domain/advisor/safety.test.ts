@@ -175,8 +175,38 @@ describe("PRD 11.7 — drug–drug questions go to a pharmacist", () => {
     expect(output.decisions[0]?.refused).toMatch(/will not perform or approximate/i);
   });
 
-  it("does not fire when the user has no medications on file", () => {
+  it("fires with an empty medication list, because 11.7 is unconditional", () => {
+    // The gap this closes: the rule used to require a name from the user's own
+    // list, so every one of these fell through to the fallback and was answered
+    // with a generic "recorded" — no pharmacist, no handoff — for anyone who had
+    // not entered their medications yet.
+    const unknown = [
+      "can i take lisinopril with ibuprofen",
+      "is it ok to combine metformin and alcohol",
+      "can i take my blood pressure pill with advil",
+      "does omeprazole interact with anything",
+      "safe to take naproxen and tylenol at the same time",
+      "any risk taking my antibiotic with ibuprofen",
+    ];
+
+    for (const text of unknown) {
+      expect(ruleFor(text), text).toBe("drug-drug");
+    }
+  });
+
+  it("still needs something medicinal in play", () => {
+    // An interaction frame on its own is not a pharmacist question; over-routing
+    // every "can I combine…" would make the handoff meaningless.
     expect(ruleFor("can i take these together")).not.toBe("drug-drug");
+    expect(ruleFor("can i combine the two training sessions")).not.toBe("drug-drug");
+    expect(ruleFor("is it ok to mix oats with yogurt")).not.toBe("drug-drug");
+  });
+
+  it("does not route an ordinary adherence log", () => {
+    // The regression guard for the widened matcher: a logged dose mentions a
+    // medication word and the word "with", and must still not be routed out.
+    expect(ruleFor("took my pill with breakfast")).not.toBe("drug-drug");
+    expect(ruleFor("took my medication this morning")).not.toBe("drug-drug");
   });
 
   it("matches medication names on word boundaries only", () => {
