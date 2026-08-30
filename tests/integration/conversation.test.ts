@@ -176,6 +176,26 @@ describeIfDb("conversation round trip", () => {
     expect(leaked.rows[0]?.count).toBe("0");
   });
 
+  it.each(["shrink", "psych"])(
+    "discards explicit %s encounter content before persistence",
+    async (providerAlias) => {
+      const privateToken = `therapy-alias-private-${crypto.randomUUID()}`;
+      const result = await handleUtterance({
+        text:
+          providerAlias === "shrink"
+            ? `I saw my shrink today and discussed ${privateToken}`
+            : `I talked with my psych today about ${privateToken}`,
+      });
+
+      expect(result.output.trace.ruleId).toBe("therapy-content");
+      const leaked = await client.query<{ count: string }>(
+        "select count(*) from ashwini.messages where text like $1",
+        [`%${privateToken}%`],
+      );
+      expect(leaked.rows[0]?.count).toBe("0");
+    },
+  );
+
   it("discards crisis content before it reaches the message table", async () => {
     const privateToken = `crisis-private-${crypto.randomUUID()}`;
     const result = await handleUtterance({
@@ -235,6 +255,19 @@ describeIfDb("conversation round trip", () => {
     expect(rows[0]?.count).toBe("1");
   });
 
+  it.each([
+    ["meal", "I ate lunch: chicken, rice, and yogurt"],
+    ["symptom", "my shoulder hurts when I press overhead"],
+  ])("replays the exact durable %s record shape", async (_label, text) => {
+    const key = `structured-${crypto.randomUUID()}`;
+    const first = await handleUtterance({ text, idempotencyKey: key });
+    const replay = await handleUtterance({ text, idempotencyKey: key });
+
+    expect(replay.replayed).toBe(true);
+    expect(replay.output).toEqual(first.output);
+    expect(replay.output.records).toEqual(first.output.records);
+  });
+
   it("rejects reuse of an idempotency key for different wording", async () => {
     const key = `test-${crypto.randomUUID()}`;
     await handleUtterance({ text: "I feel flat today", idempotencyKey: key });
@@ -256,6 +289,7 @@ describeIfDb("conversation round trip", () => {
 
     expect(first.replayed).toBe(false);
     expect(replay.replayed).toBe(true);
+    expect(replay.output).toEqual(first.output);
     await expect(
       handleUtterance({
         text: "I just left therapy and now I have chest pain",

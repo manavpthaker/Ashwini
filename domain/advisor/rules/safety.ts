@@ -22,14 +22,98 @@ const URGENT =
 const OVERDOSE =
   /\boverdosed?(?: on\b[^.?!]{0,40})?\b|\b(?:took|taken|swallowed|ingested)\b[^.?!]{0,35}\b(?:(?:all|too many|too much|a lot|a handful|a bunch)(?: of)? (?:my )?|(?:a|the) (?:whole )?bottle(?: of )?|(?:\d{2,}|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)(?: of )?(?:my )?)\s*(?:pills|tablets|capsules|meds|medication|tylenol|acetaminophen|paracetamol|ibuprofen|advil|motrin)\b|\b(?:took|taken)\b[^.?!]{0,35}\b(?:more (?:pills|tablets|capsules|meds|medication) than (?:i|we) should(?: have)?|an? (?:accidental )?(?:double|extra) dose|(?:my )?(?:pills|tablets|capsules|meds|medication) twice)\b/;
 
+const UNILATERAL_WEAKNESS =
+  /\b(?:my )?(?:left|right) (?:arm|leg|side) (?:(?:is|feels?) )?(?:suddenly )?weak\b|\b(?:sudden(?:ly)? )?weakness (?:in|on|down) (?:my )?(?:left|right) (?:arm|leg|side)\b/;
+const UNILATERAL_WEAKNESS_NEGATED =
+  /\b(?:my )?(?:left|right) (?:arm|leg|side) (?:(?:is|feels?) )?(?:not|no longer) weak\b|\b(?:no|without|deny|denies|denied) (?:any )?(?:sudden )?weakness (?:in|on|down) (?:my )?(?:left|right) (?:arm|leg|side)\b/;
+
+const HIGH_MULTI_PILL_INGESTION =
+  /\b(?:took|have taken|swallowed|ingested)\b[^.?!]{0,35}\b(?:[6-9]|\d{2,}|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*(?:of )?(?:my )?(?:sleeping )?(?:pills?|tablets?|capsules?|doses?|meds?|medications?|tylenol|acetaminophen|paracetamol|ibuprofen|advil|motrin)\b/;
+const EXTRA_MULTI_PILL_INGESTION =
+  /\b(?:took|have taken|swallowed|ingested)\b[^.?!]{0,35}\b(?:(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:extra|additional)|(?:extra|additional)\s+(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve))\s+(?:pills?|tablets?|capsules?|doses?|meds?|medications?)\b/;
+const ACCIDENTAL_MULTI_PILL_INGESTION =
+  /\b(?:accidentally|by mistake)\s+(?:took|have taken|swallowed|ingested)\b[^.?!]{0,35}\b(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:pills?|tablets?|capsules?|doses?|meds?|medications?)\b|\b(?:took|have taken|swallowed|ingested)\b[^.?!]{0,35}\b(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:pills?|tablets?|capsules?|doses?|meds?|medications?)\b[^.?!]{0,20}\b(?:accidentally|by mistake)\b/;
+
 const STIFF_NECK = /\b(stiff neck|neck (?:is|feels?) stiff)\b/;
 const FEVER = /\bfever(?:ish)?\b/;
 const URGENT_NEGATED =
   /\b(?:do not|don't|did not|didn't|does not|doesn't|have not|haven't|am not|i'm not|no longer|never)\s+(?:currently )?(?:have|having|feel|feeling|experience|experiencing|had)?\s*(?:any |a )?(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|heart attack|stroke|seizure|fainting|fever|stiff neck)\b|\b(?:have not|haven't) (?:passed out|fainted)\b|\b(?:no|deny|denies|denied) (?:any )?(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|heart attack|stroke|seizure|fever|stiff neck)\b|\b(?:i )?(?:have |had )?never had (?:a )?(?:seizure|fainting episode)\b|\b(?:did not|didn't|have not|haven't) (?:overdose|overdosed|take|swallow|swallowed|ingest|ingested)\b|\bi(?:'m| am) not (?:going|planning|about) to overdose\b|\bi (?:do not|don't) plan to overdose\b/;
 const URGENT_HYPOTHETICAL =
-  /\b(?:if|what if|in case)\b[^.?!]{0,80}\b(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|seizure|faint|fever|stiff neck|overdose)\b/;
+  /\b(?:if|what if|in case)\b[^.?!]{0,100}\b(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|seizure|faint|fever|stiff neck|overdose|(?:left|right) (?:arm|leg|side)[^.?!]{0,20}weak|weakness (?:in|on|down) (?:my )?(?:left|right) (?:arm|leg|side)|(?:took|take|swallowed|ingested)[^.?!]{0,35}(?:pills?|tablets?|capsules?|doses?|tylenol|acetaminophen|paracetamol|ibuprofen|advil|motrin))\b/;
 const URGENT_HISTORICAL =
-  /\b(?:used to have|previously had)\b[^.?!]{0,50}\b(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|seizure|fever|stiff neck)\b|\b(?:had (?:chest pain|chest pressure|a seizure|fever|a stiff neck)|fainted|passed out)\b[^.?!]{0,45}\b(?:yesterday|last (?:week|month|year)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) (?:days?|weeks?|months?|years?) ago|as a child)\b/;
+  /\b(?:used to have|previously had)\b[^.?!]{0,50}\b(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|seizure|fever|stiff neck|weakness)\b|\b(?:had (?:chest pain|chest pressure|a seizure|fever|a stiff neck)|fainted|passed out|(?:my )?(?:left|right) (?:arm|leg|side) (?:was|felt) (?:suddenly )?weak)\b[^.?!]{0,45}\b(?:yesterday|last (?:week|month|year)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) (?:days?|weeks?|months?|years?) ago|as a child)\b/;
+
+const MSK_COMPLAINT =
+  /\b(?:pain(?:ful)?|hurts?|hurting|injur\w*|sprain\w*|strain\w*|swollen|swelling|stiff(?:ness)?)\b/;
+const MSK_LOSS_OF_FUNCTION =
+  /\b(?:cannot|can't|unable to|can barely)\s+(?:lift|move|use|raise|straighten|bend|walk|stand|put weight on|bear weight on)\b/;
+const MSK_BODY_REGION = /\b(?:arm|shoulder|hand|wrist|elbow|leg|knee|ankle|foot|hip|back|neck)\b/;
+const MSK_NEUROLOGICAL =
+  /\b(?:numb(?:ness)?|tingl\w*|pins and needles|loss of sensation|new weakness|weak grip)\b/;
+const MSK_NEUROLOGICAL_NEGATED =
+  /\b(?:no|not|without|do not|don't|did not|didn't)\b[^.?!]{0,24}\b(?:numb(?:ness)?|tingl\w*|pins and needles|loss of sensation|weakness|weak grip)\b/;
+const MSK_TRAUMA =
+  /\b(?:after|when) (?:i |we )?(?:fell|fall|crashed|collided|was hit|landed hard)\b|\b(?:i|we) (?:fell|crashed|collided|landed hard)\b|\b(?:after|from) (?:a |the )?(?:fall|crash|collision|hard impact)\b|\bheard (?:a )?pop\b|\bvisible deformity\b/;
+const MSK_EXPLICIT_IMPACT =
+  /\b(?:landed hard|hard impact|heard (?:a )?pop(?!\s+music)|visible deformity)\b/;
+const MSK_SEVERE_OR_WORSENING =
+  /\b(?:severe|unbearable|rapidly worsening|getting worse|worsening)\b[^.?!]{0,30}\b(?:pain|injury|swelling)\b|\b(?:pain|injury|swelling)\b[^.?!]{0,30}\b(?:severe|unbearable|rapidly worsening|getting worse|worsening)\b/;
+const MSK_RED_FLAG_HYPOTHETICAL =
+  /\b(?:if|what if|in case)\b[^.?!]{0,100}\b(?:pain|hurt|injury|numb|tingl|weak|fall|fell|cannot|can't|unable|pop|crash|collision)\b/;
+const MSK_RED_FLAG_HISTORICAL =
+  /\b(?:used to have|previously had)\b[^.?!]{0,80}\b(?:pain|injury|numb|tingl|weakness|stiffness)\b|\b(?:fell|had (?:a )?(?:fall|crash|collision)|heard (?:a )?pop|(?:arm|hand|leg|foot) (?:was|felt) (?:numb|tingling|weak))\b[^.?!]{0,45}\b(?:yesterday|last (?:week|month|year)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) (?:days?|weeks?|months?|years?) ago|in the past)\b/;
+
+function isCurrentOwnerMskRedFlag(text: string): boolean {
+  const ownerText = attributedHealthClauses(text)
+    .filter(isOwnerHealthClause)
+    .map((clause) => clause.text)
+    .join(" ");
+
+  const lossOfFunction = MSK_LOSS_OF_FUNCTION.test(ownerText) && MSK_BODY_REGION.test(ownerText);
+  const neurological =
+    MSK_NEUROLOGICAL.test(ownerText) &&
+    (MSK_BODY_REGION.test(ownerText) || /\bweak grip\b/.test(ownerText)) &&
+    !MSK_NEUROLOGICAL_NEGATED.test(ownerText);
+  const trauma =
+    MSK_TRAUMA.test(ownerText) &&
+    (MSK_BODY_REGION.test(ownerText) ||
+      MSK_COMPLAINT.test(ownerText) ||
+      MSK_EXPLICIT_IMPACT.test(ownerText));
+  const severeOrWorsening = MSK_SEVERE_OR_WORSENING.test(ownerText);
+
+  if (
+    (!MSK_COMPLAINT.test(ownerText) &&
+      !lossOfFunction &&
+      !neurological &&
+      !trauma &&
+      !severeOrWorsening) ||
+    MSK_RED_FLAG_HYPOTHETICAL.test(ownerText) ||
+    MSK_RED_FLAG_HISTORICAL.test(ownerText)
+  ) {
+    return false;
+  }
+
+  return lossOfFunction || neurological || trauma || severeOrWorsening;
+}
+
+function isOwnerMskRedFlagHypothetical(text: string): boolean {
+  const ownerText = attributedHealthClauses(text)
+    .filter(isOwnerHealthClause)
+    .map((clause) => clause.text)
+    .join(" ");
+  const lossOfFunction = MSK_LOSS_OF_FUNCTION.test(ownerText) && MSK_BODY_REGION.test(ownerText);
+  const neurological =
+    MSK_NEUROLOGICAL.test(ownerText) &&
+    (MSK_BODY_REGION.test(ownerText) || /\bweak grip\b/.test(ownerText)) &&
+    !MSK_NEUROLOGICAL_NEGATED.test(ownerText);
+  const trauma =
+    MSK_TRAUMA.test(ownerText) &&
+    (MSK_BODY_REGION.test(ownerText) ||
+      MSK_COMPLAINT.test(ownerText) ||
+      MSK_EXPLICIT_IMPACT.test(ownerText));
+
+  return MSK_RED_FLAG_HYPOTHETICAL.test(ownerText) && (lossOfFunction || neurological || trauma);
+}
 
 function isCurrentPersonalUrgentText(text: string): boolean {
   const hasFeverWithStiffNeck = STIFF_NECK.test(text) && FEVER.test(text);
@@ -49,10 +133,15 @@ function isCurrentPersonalUrgentText(text: string): boolean {
     const hasUrgentSignal =
       URGENT.test(clause.text) ||
       OVERDOSE.test(clause.text) ||
+      UNILATERAL_WEAKNESS.test(clause.text) ||
+      HIGH_MULTI_PILL_INGESTION.test(clause.text) ||
+      EXTRA_MULTI_PILL_INGESTION.test(clause.text) ||
+      ACCIDENTAL_MULTI_PILL_INGESTION.test(clause.text) ||
       (STIFF_NECK.test(clause.text) && FEVER.test(clause.text));
     if (
       !hasUrgentSignal ||
       URGENT_NEGATED.test(clause.text) ||
+      UNILATERAL_WEAKNESS_NEGATED.test(clause.text) ||
       URGENT_HYPOTHETICAL.test(clause.text) ||
       URGENT_HISTORICAL.test(clause.text)
     ) {
@@ -122,6 +211,14 @@ const PRESCRIPTION_CHANGE =
   /\b((increase|increasing|decrease|decreasing|raise|raising|lower|lowering|double|doubling|halve|halving|split|stop|stopping|skip|skipping|quit|change|changing|adjust|adjusting|switch|switching|taper|tapering|wean|weaning|come off|get off)\b[^.?!]{0,40}\b(dose|dosage|medication|meds|prescription|pill|tablet|mg)|\b(dose|dosage|medication|meds|prescription)\b[^.?!]{0,40}\b(increase|decrease|higher|lower|double|stop|skip|change|adjust|switch|taper))\b/;
 const PRESCRIPTION_CHANGE_NEGATED =
   /\b(?:do not|don't|did not|didn't|have not|haven't|am not|i'm not|never)\b[^.?!]{0,50}\b(?:increase|decrease|raise|lower|double|halve|split|stop|skip|change|adjust|switch|taper|wean)\w*\b/;
+const PRESCRIPTION_ADVICE_QUESTION =
+  /\b(?:should|can|could|would|may|do) (?:i|we) (?:take|use)\b|\bis it (?:ok|okay|safe|fine) (?:for (?:me|us) )?to (?:take|use)\b/;
+const PRESCRIPTION_DOSE_OR_TIMING_TARGET =
+  /\b(?:extra|additional|another|double|half) (?:dose|pill|tablet|capsule)\b|\b(?:[2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten) (?:pills?|tablets?|capsules?|doses?)\b|\b\d+(?:\.\d+)?\s*mg\b|\b(?:missed|forgot)\b[^.?!]{0,40}\b(?:dose|pill|tablet|capsule|medication|medicine|meds?)\b|\b(?:now|tonight|this morning|this afternoon|this evening|later)\b/;
+const IMPLICIT_MEDICATION_TIMING_QUESTION =
+  /\b(?:should|can|could|would|may|do) (?:i|we) take it (?:now|tonight|this morning|this afternoon|this evening|later)(?:\s+(?:or|instead of)\s+(?:now|tonight|this morning|this afternoon|this evening|later))?\b/;
+const TRAINING_CHANGE_TARGET =
+  /\b(?:skip|cancel|modify|change|reduce|shorten|adjust)\s+(?:training|the gym|my workout|my session|the workout|the session)\b/g;
 
 function reply(text: string, receipt: string): RuleOutcome["reply"] {
   return { text, kind: "route", receipt };
@@ -176,6 +273,63 @@ export const urgentSymptomRule: Rule = {
     expectedLag: null,
     gated: false,
   }),
+};
+
+export const musculoskeletalRedFlagRule: Rule = {
+  id: "musculoskeletal-red-flag",
+  matches: ({ text }) => isCurrentOwnerMskRedFlag(text) || isOwnerMskRedFlagHypothetical(text),
+  apply: ({ input, text }) => {
+    if (isOwnerMskRedFlagHypothetical(text)) {
+      return {
+        domain: "body",
+        evidenceStatus: "unusable",
+        ladderLevel: 1,
+        decisionType: "data_quality_block",
+        route: null,
+        reply: {
+          text: "That is phrased as a hypothetical, so I have not recorded it as your symptom or routed it as a current concern. If this is happening now, say that directly; otherwise there is nothing to add to your health record.",
+          kind: "question",
+          receipt: "No current symptom recorded · no route created",
+        },
+        records: [],
+        followUp: null,
+        confidenceNote: "No current owner symptom was asserted.",
+        refused:
+          "Ashwini will not convert a hypothetical symptom into a personal health record or current clinical route.",
+        choices: [],
+        target: null,
+        expectedLag: null,
+        gated: false,
+        gateOverride: {
+          outcome: "blocked",
+          reason: "The wording is hypothetical rather than a current symptom report.",
+          checked: [],
+        },
+      };
+    }
+
+    return {
+      domain: "body",
+      evidenceStatus: "route_out",
+      ladderLevel: 5,
+      decisionType: "route_out",
+      route: "clinician",
+      reply: reply(
+        "The loss of function, trauma, numbness or weakness, or severe/worsening symptom you reported is outside a training adjustment. Stop loading the affected movement and arrange prompt clinical assessment. If it is rapidly worsening or you develop emergency symptoms, use urgent or emergency care. Ashwini has recorded your report but has not assessed the cause.",
+        "Clinician route recorded · training advice withheld",
+      ),
+      records: [{ kind: "symptom", text: input.utterance.text, bodyRegion: null }],
+      followUp: null,
+      confidenceNote:
+        "Routed from the user's reported musculoskeletal red flag; no diagnosis or severity assessment was made.",
+      refused:
+        "Ashwini will not reduce a reported red flag to exercise selection, diagnose the injury, or prescribe rehabilitation.",
+      choices: [],
+      target: null,
+      expectedLag: null,
+      gated: false,
+    };
+  },
 };
 
 export const pregnancyRule: Rule = {
@@ -292,12 +446,28 @@ export const drugDrugRule: Rule = {
 
 export const prescriptionChangeRule: Rule = {
   id: "prescription-change",
-  matches: ({ text }) => {
-    const ownerText = attributedHealthClauses(text)
+  matches: (context) => {
+    const ownerText = attributedHealthClauses(context.text)
       .filter(isOwnerHealthClause)
       .map((clause) => clause.text)
       .join(", ");
-    return PRESCRIPTION_CHANGE.test(ownerText) && !PRESCRIPTION_CHANGE_NEGATED.test(ownerText);
+    const medicationText = ownerText.replace(TRAINING_CHANGE_TARGET, "");
+    const namedMedication = mentionedMedications({ ...context, text: medicationText }).length > 0;
+    const hasMedicationSubject =
+      namedMedication ||
+      MEDICATION_WORD.test(medicationText) ||
+      /\b(?:dose|doses|dosage)\b/.test(medicationText) ||
+      /\b\d+(?:\.\d+)?\s*mg\b/.test(medicationText);
+    const doseOrTimingQuestion =
+      (PRESCRIPTION_ADVICE_QUESTION.test(medicationText) &&
+        PRESCRIPTION_DOSE_OR_TIMING_TARGET.test(medicationText) &&
+        hasMedicationSubject) ||
+      IMPLICIT_MEDICATION_TIMING_QUESTION.test(medicationText);
+
+    return (
+      (PRESCRIPTION_CHANGE.test(medicationText) || doseOrTimingQuestion) &&
+      !PRESCRIPTION_CHANGE_NEGATED.test(medicationText)
+    );
   },
   apply: () => ({
     domain: "medication",
@@ -357,6 +527,7 @@ export const therapyRule: Rule = {
 export const safetyRules: readonly Rule[] = [
   crisisRule,
   urgentSymptomRule,
+  musculoskeletalRedFlagRule,
   pregnancyRule,
   skinLesionRule,
   drugDrugRule,

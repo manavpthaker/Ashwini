@@ -12,6 +12,7 @@ import { SENSITIVE_REDACTION } from "@/domain/advisor/sensitive-content";
  */
 
 const decision = (over: Partial<WireDecision> = {}): WireDecision => ({
+  decisionId: "00000000-0000-4000-8000-000000000001",
   type: "recommendation",
   domain: "training",
   evidenceStatus: "rule_based",
@@ -21,6 +22,7 @@ const decision = (over: Partial<WireDecision> = {}): WireDecision => ({
   target: "Keep training consistency",
   refused: "No claim about the cause.",
   choices: ["Reduce volume", "Do nothing"],
+  response: null,
   ...over,
 });
 
@@ -168,6 +170,28 @@ describe("effects are established, never guessed", () => {
 });
 
 describe("what the user is shown", () => {
+  test("a durable decision response remains attached after reload", () => {
+    const response = toCheckinResponse(
+      turn({
+        decisions: [
+          decision({
+            response: {
+              choice: "Keep optional effort flexible today",
+              respondedAt: "2026-08-30T15:45:00.000Z",
+            },
+          }),
+        ],
+      }),
+    );
+
+    expect(response.decision).toEqual({
+      id: "00000000-0000-4000-8000-000000000001",
+      choices: ["Reduce volume", "Do nothing"],
+      selectedChoice: "Keep optional effort flexible today",
+      respondedAt: "2026-08-30T15:45:00.000Z",
+    });
+  });
+
   test("the advisor's own words are the recommendation, unedited", () => {
     const text = "I'd take the painful movement out of today's session.";
     const response = toCheckinResponse(

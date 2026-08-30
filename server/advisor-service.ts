@@ -48,6 +48,11 @@ export interface HandleUtteranceResult {
   readonly advisorMessageId: string;
   readonly ts: Date;
   readonly decisionIds: readonly string[];
+  /**
+   * The durable form of the advisor output. Record drafts are canonicalized to
+   * what was actually persisted, so an idempotent replay can return this object
+   * exactly without re-running current rules or recovering discarded wording.
+   */
   readonly output: AdvisorOutput;
   /** True when an earlier identical write already landed. */
   readonly replayed: boolean;
@@ -84,6 +89,7 @@ export async function handleUtterance(
   const advisor = createRulesAdvisor();
   const now = clock.now();
   const sensitiveRuleId = classifySensitiveContent(input.text);
+  const persistedUserText = retainedUserText(sensitiveRuleId, input.text);
 
   if (input.idempotencyKey) {
     const existing = await kysely
@@ -118,7 +124,7 @@ export async function handleUtterance(
         .values({
           ts: now,
           role: "user",
-          text: retainedUserText(sensitiveRuleId, input.text),
+          text: persistedUserText,
           kind: "record",
           idempotency_key: input.idempotencyKey ?? null,
           input_fingerprint: inputFingerprint(input),
@@ -192,6 +198,7 @@ export async function handleUtterance(
         decisionIds.push(row.decision_id);
       }
 
+      const persistedRecords: RecordDraft[] = [];
       for (const record of output.records) {
         const written = await writeRecord(
           trx,
@@ -200,7 +207,9 @@ export async function handleUtterance(
           userMessage.message_id,
           output,
           sensitiveRuleId,
+          persistedUserText,
         );
+        persistedRecords.push(written.record);
         await trx
           .insertInto("ashwini.routed_records")
           .values({
@@ -208,8 +217,8 @@ export async function handleUtterance(
             // A kind with no table of its own is still a record: the message is
             // it. Skipping the row here is what used to make a medication event
             // visible in the response and invisible after a reload.
-            record_table: written?.table ?? "messages",
-            record_id: written?.id ?? userMessage.message_id,
+            record_table: written.table,
+            record_id: written.id,
             record_kind: record.kind,
           })
           .execute();
@@ -217,11 +226,11 @@ export async function handleUtterance(
 
       return {
         userMessageId: userMessage.message_id,
-        userText: retainedUserText(sensitiveRuleId, input.text),
+        userText: persistedUserText,
         advisorMessageId: advisorMessage.message_id,
         ts: now,
         decisionIds,
-        output,
+        output: { ...output, records: persistedRecords },
         replayed: false,
       };
     });
@@ -347,10 +356,14 @@ async function loadPersistedReplay(
       .execute(),
     kysely
       .selectFrom("ashwini.routed_records")
-      .select("record_kind")
+      .select(["record_kind", "record_table", "record_id"])
       .where("message_id", "=", existing.message_id)
       .execute(),
   ]);
+
+  const replayedRecords = await Promise.all(
+    routed.map((row) => loadReplayRecord(kysely, row, existing)),
+  );
 
   const decisions: DecisionDraft[] = storedDecisions.map((decision) => ({
     type: decision.type,
@@ -386,7 +399,7 @@ async function loadPersistedReplay(
     output: {
       reply: { text: reply.text, kind: reply.kind, receipt: reply.receipt ?? "" },
       decisions,
-      records: routed.map((row) => replayRecord(row.record_kind)),
+      records: replayedRecords,
       // Follow-ups are deliberately not re-asked from history. The persisted
       // reply remains authoritative; no current-context text is regenerated.
       followUp: null,
@@ -403,23 +416,97 @@ function sensitiveRuleIdForStoredText(value: string): SensitiveRuleId | null {
   return null;
 }
 
-function replayRecord(kind: RecordDraft["kind"]): RecordDraft {
-  switch (kind) {
+async function loadReplayRecord(
+  kysely: Kysely<Database>,
+  row: {
+    record_kind: RecordDraft["kind"];
+    record_table: string;
+    record_id: string;
+  },
+  message: { message_id: string; text: string },
+): Promise<RecordDraft> {
+  switch (row.record_kind) {
     case "context_note":
-      return { kind, text: "Stored context note." };
-    case "symptom":
-      return { kind, text: "Stored symptom record.", bodyRegion: null };
-    case "meal":
-      return { kind, mealKind: null };
+      assertMessageBackedRecord(row, message.message_id);
+      return { kind: row.record_kind, text: message.text };
+    case "symptom": {
+      assertRecordTable(row, "symptoms");
+      const symptom = await kysely
+        .selectFrom("ashwini.symptoms")
+        .select(["text", "body_region"])
+        .where("symptom_id", "=", row.record_id)
+        .executeTakeFirst();
+      if (!symptom) throw incompleteReplay(row.record_kind);
+      return {
+        kind: row.record_kind,
+        text: symptom.text,
+        bodyRegion: symptom.body_region,
+      };
+    }
+    case "meal": {
+      assertRecordTable(row, "meals");
+      const meal = await kysely
+        .selectFrom("ashwini.meals")
+        .select(["kind", "description"])
+        .where("meal_id", "=", row.record_id)
+        .executeTakeFirst();
+      if (!meal) throw incompleteReplay(row.record_kind);
+      return {
+        kind: row.record_kind,
+        mealKind: meal.kind,
+        description: meal.description,
+      };
+    }
     case "medication_event":
-      return { kind, text: "Stored medication event." };
-    case "dermatology_handoff":
-      return { kind, userWording: "Stored dermatology handoff." };
+      assertMessageBackedRecord(row, message.message_id);
+      return { kind: row.record_kind, text: message.text };
+    case "dermatology_handoff": {
+      assertRecordTable(row, "dermatology_handoffs");
+      const handoff = await kysely
+        .selectFrom("ashwini.dermatology_handoffs")
+        .select("user_wording")
+        .where("handoff_id", "=", row.record_id)
+        .executeTakeFirst();
+      if (!handoff) throw incompleteReplay(row.record_kind);
+      return { kind: row.record_kind, userWording: handoff.user_wording };
+    }
     case "interaction_check_request":
-      return { kind, items: [] };
-    case "therapy_mention":
-      return { kind };
+      // The current schema records that a check was requested, but has no
+      // payload column for the item set. The canonical durable representation
+      // is therefore intentionally empty on both the first result and replay.
+      assertMessageBackedRecord(row, message.message_id);
+      return { kind: row.record_kind, items: [] };
+    case "therapy_mention": {
+      assertRecordTable(row, "therapy_mentions");
+      const mention = await kysely
+        .selectFrom("ashwini.therapy_mentions")
+        .select("mention_id")
+        .where("mention_id", "=", row.record_id)
+        .executeTakeFirst();
+      if (!mention) throw incompleteReplay(row.record_kind);
+      return { kind: row.record_kind };
+    }
   }
+}
+
+function assertMessageBackedRecord(
+  row: { record_kind: RecordDraft["kind"]; record_table: string; record_id: string },
+  messageId: string,
+): void {
+  if (row.record_table !== "messages" || row.record_id !== messageId) {
+    throw incompleteReplay(row.record_kind);
+  }
+}
+
+function assertRecordTable(
+  row: { record_kind: RecordDraft["kind"]; record_table: string },
+  expected: string,
+): void {
+  if (row.record_table !== expected) throw incompleteReplay(row.record_kind);
+}
+
+function incompleteReplay(kind: RecordDraft["kind"]): Error {
+  return new Error(`The stored ${kind} record is incomplete and cannot be replayed.`);
 }
 
 /**
@@ -433,21 +520,27 @@ async function writeRecord(
   messageId: string,
   output: AdvisorOutput,
   sensitiveRuleId: SensitiveRuleId | null,
-): Promise<{ table: string; id: string } | null> {
+  persistedUserText: string,
+): Promise<{ table: string; id: string; record: RecordDraft }> {
   switch (record.kind) {
     case "symptom": {
+      const text = sensitiveRuleId ? SENSITIVE_REDACTION[sensitiveRuleId] : record.text;
       const row = await trx
         .insertInto("ashwini.symptoms")
         .values({
           ts: now,
-          text: sensitiveRuleId ? SENSITIVE_REDACTION[sensitiveRuleId] : record.text,
+          text,
           body_region: record.bodyRegion,
           message_id: messageId,
           routed_to: output.route,
         })
         .returning("symptom_id")
         .executeTakeFirstOrThrow();
-      return { table: "symptoms", id: row.symptom_id };
+      return {
+        table: "symptoms",
+        id: row.symptom_id,
+        record: { ...record, text },
+      };
     }
 
     case "meal": {
@@ -460,25 +553,33 @@ async function writeRecord(
           // PRD 7.2: a text log without a recipe is a low-confidence estimate,
           // and it is stored with no numbers at all rather than invented ones.
           confidence: "low",
+          description: record.description,
           message_id: messageId,
         })
         .returning("meal_id")
         .executeTakeFirstOrThrow();
-      return { table: "meals", id: row.meal_id };
+      return { table: "meals", id: row.meal_id, record };
     }
 
     case "dermatology_handoff": {
+      const userWording = sensitiveRuleId
+        ? SENSITIVE_REDACTION[sensitiveRuleId]
+        : record.userWording;
       const row = await trx
         .insertInto("ashwini.dermatology_handoffs")
         .values({
           reported_ts: now,
-          user_wording: sensitiveRuleId ? SENSITIVE_REDACTION[sensitiveRuleId] : record.userWording,
+          user_wording: userWording,
           routed_to: "dermatologist",
           message_id: messageId,
         })
         .returning("handoff_id")
         .executeTakeFirstOrThrow();
-      return { table: "dermatology_handoffs", id: row.handoff_id };
+      return {
+        table: "dermatology_handoffs",
+        id: row.handoff_id,
+        record: { ...record, userWording },
+      };
     }
 
     case "therapy_mention": {
@@ -488,14 +589,29 @@ async function writeRecord(
         .values({ ts: now, message_id: messageId })
         .returning("mention_id")
         .executeTakeFirstOrThrow();
-      return { table: "therapy_mentions", id: row.mention_id };
+      return { table: "therapy_mentions", id: row.mention_id, record };
     }
 
-    // These carry no dedicated table yet: the message itself is the record, and
-    // routed_records would point at nothing. Deliberately not invented.
+    // These carry no dedicated table yet: the persisted user message is the
+    // canonical record. The service returns that same durable representation on
+    // both the first response and an idempotent replay.
     case "context_note":
+      return {
+        table: "messages",
+        id: messageId,
+        record: { kind: record.kind, text: persistedUserText },
+      };
     case "medication_event":
+      return {
+        table: "messages",
+        id: messageId,
+        record: { kind: record.kind, text: persistedUserText },
+      };
     case "interaction_check_request":
-      return null;
+      return {
+        table: "messages",
+        id: messageId,
+        record: { kind: record.kind, items: [] },
+      };
   }
 }

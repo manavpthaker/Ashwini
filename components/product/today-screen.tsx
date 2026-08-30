@@ -115,7 +115,23 @@ function nextLabelFor(decision: OpenDecision | undefined): string {
   if (!decision) return "Check-in";
   if (decision.route) return "Contact a professional";
   if (decision.choices.length > 0) return "Plan choice";
-  return "Next check-in";
+  if (decision.type === "data_quality_block") return "Review missing evidence";
+  return "Review prompt";
+}
+
+function checkinTone(record: CheckinRecord): StatusTone {
+  if (record.response.kind === "route-out") return "route";
+  if (record.response.perspectives.some((item) => item.tone === "nutrition")) {
+    return "nutrition";
+  }
+  if (
+    record.response.perspectives.some(
+      (item) => item.tone === "training" || item.tone === "recovery",
+    )
+  ) {
+    return "training";
+  }
+  return "neutral";
 }
 
 function PerspectivePath({ item, nextLabel }: { item: PerspectiveContribution; nextLabel: string }) {
@@ -230,8 +246,17 @@ export function buildTimeline(
       at: checkin.recordedAt,
       domain: checkin.response.perspectives[0]?.role ?? "Check-in",
       title: checkin.response.headline,
-      detail: checkin.response.receipt,
-      ...(primaryDecision?.sourceMessageId === checkin.id ? { state: "current" as const } : {}),
+      detail: checkin.response.decision?.selectedChoice
+        ? `${checkin.response.receipt} · response: ${checkin.response.decision.selectedChoice}`
+        : checkin.response.receipt,
+      ...(primaryDecision?.sourceMessageId === checkin.id
+        ? { state: "current" as const }
+        : checkin.response.decision?.selectedChoice === "Acknowledged"
+          ? { state: "complete" as const }
+          : checkin.response.kind === "follow-up" ||
+              checkin.response.decision?.selectedChoice
+            ? { state: "current" as const }
+          : {}),
     });
   }
 
@@ -324,6 +349,26 @@ export function nextUpcomingTimelineItem(
   );
 }
 
+function continuityTimestamp(record: CheckinRecord): number {
+  const value = record.response.decision?.respondedAt ?? record.recordedAt;
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export function latestContinuityCheckin(
+  checkins: readonly CheckinRecord[],
+): CheckinRecord | undefined {
+  return checkins
+    .filter(
+      (record) =>
+        record.response.kind === "follow-up" ||
+        Boolean(record.response.decision?.selectedChoice),
+    )
+    .slice()
+    .sort((left, right) => continuityTimestamp(right) - continuityTimestamp(left))[0];
+}
+
 export function TodayScreen() {
   const router = useRouter();
   const { checkins, openDecisions, loading: recordLoading, error: recordError } = useProduct();
@@ -335,7 +380,39 @@ export function TodayScreen() {
   const loading = recordLoading || snapshotLoading;
   const error = recordError ?? snapshotError;
   const primaryDecision = loading || error ? undefined : openDecisions[0];
-  const perspectives = primaryDecision ? [perspectiveFor(primaryDecision)] : [];
+  const supersededIds = useMemo(
+    () =>
+      new Set(
+        checkins.flatMap((record) => (record.correctionOf ? [record.correctionOf] : [])),
+      ),
+    [checkins],
+  );
+  const currentDayCheckins = useMemo(
+    () =>
+      snapshot
+        ? checkins.filter(
+            (record) =>
+              !supersededIds.has(record.id) &&
+              record.recordedAt &&
+              dayInZone(record.recordedAt, snapshot.timeZone) === snapshot.day,
+          )
+        : [],
+    [checkins, snapshot, supersededIds],
+  );
+  const continuityCheckin = primaryDecision
+    ? undefined
+    : latestContinuityCheckin(currentDayCheckins);
+  const pendingCheckin =
+    continuityCheckin?.response.kind === "follow-up" &&
+    !continuityCheckin.response.decision?.selectedChoice
+      ? continuityCheckin
+      : undefined;
+  const answeredCheckin = continuityCheckin?.response.decision?.selectedChoice
+    ? continuityCheckin
+    : undefined;
+  const perspectives = primaryDecision
+    ? [perspectiveFor(primaryDecision)]
+    : (continuityCheckin?.response.perspectives ?? []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -418,10 +495,41 @@ export function TodayScreen() {
             summary: primaryDecision.reply.text,
             status: EVIDENCE_LABEL[primaryDecision.evidenceStatus],
             tone: toneFor(primaryDecision),
-            recheck: primaryDecision.route ? "Contact the named professional" : primaryDecision.choices.length ? `${primaryDecision.choices.length} choices in Plan` : "Recorded next step",
+            recheck: primaryDecision.route
+              ? "Contact the named professional"
+              : primaryDecision.choices.length
+                ? `${primaryDecision.choices.length} choices in Plan`
+                : primaryDecision.type === "data_quality_block"
+                  ? "Missing evidence"
+                  : "Review the saved prompt",
             known: primaryDecision.confidenceNote,
             changes: primaryDecision.gateReason,
           }
+        : pendingCheckin
+          ? {
+              eyebrow: "Complete this check-in",
+              headline: pendingCheckin.response.headline,
+              summary: pendingCheckin.response.recommendation,
+              status: pendingCheckin.response.status,
+              tone: checkinTone(pendingCheckin),
+              recheck: "One useful detail",
+              known: pendingCheckin.response.interpretation,
+              changes: "Adding the requested detail as a correction to this check-in.",
+            }
+          : answeredCheckin?.response.decision?.selectedChoice
+            ? {
+                eyebrow: "Your recorded response",
+                headline: answeredCheckin.response.decision.selectedChoice,
+                summary:
+                  answeredCheckin.response.decision.selectedChoice === "Acknowledged"
+                    ? "The prompt is closed in Ashwini. The underlying concern is not marked resolved."
+                    : "This is the response you recorded against the latest decision; it remains attached to the check-in.",
+                status: "Recorded",
+                tone: checkinTone(answeredCheckin),
+                recheck: "Change it with a new check-in",
+                known: answeredCheckin.response.interpretation,
+                changes: "A correction, a new check-in, or a later recorded decision.",
+              }
         : hasTodayRecord
           ? {
               eyebrow: "Current record",
@@ -435,11 +543,11 @@ export function TodayScreen() {
             }
           : {
               eyebrow: "Start here",
-              headline: "Start with a check-in.",
-              summary: "No events or check-ins are recorded today. Add what happened; Ashwini will use the saved record and leave everything else unknown.",
+              headline: "What would be useful to decide today?",
+              summary: "Tell Ashwini what happened, what feels off, or the choice in front of you. You will get one bounded action, one useful question, or a clear professional boundary.",
               status: "No events today",
               tone: "neutral" as StatusTone,
-              recheck: "One check-in",
+              recheck: "Start your first check-in",
               known: "No event or check-in was returned for the configured day.",
               changes: "A recorded check-in, dose, meal, commitment, or session.",
             };
@@ -448,6 +556,10 @@ export function TodayScreen() {
     ? "Record unavailable"
     : primaryDecision
       ? nextLabelFor(primaryDecision)
+      : pendingCheckin
+        ? "Complete the check-in"
+        : answeredCheckin?.response.decision?.selectedChoice
+          ? answeredCheckin.response.decision.selectedChoice
       : upcomingTimelineItem
         ? `${upcomingTimelineItem.title} · ${snapshot ? timeLabel(upcomingTimelineItem.at, snapshot.timeZone) : ""}`
         : checkins.length === 0
@@ -481,9 +593,20 @@ export function TodayScreen() {
             </div>
 
             <div className={styles.actions}>
-              <Link href="/check-in" className={buttonClassName("primary")}>Check in <ArrowIcon /></Link>
+              <Link
+                href={pendingCheckin
+                  ? { pathname: "/check-in", query: { complete: pendingCheckin.id } }
+                  : "/check-in"}
+                className={buttonClassName("primary")}
+              >
+                {pendingCheckin ? "Add the missing detail" : "Check in"} <ArrowIcon />
+              </Link>
               {!loading && !error && <Button variant="secondary" onClick={showReasoning}>Why this?</Button>}
-              {primaryDecision?.choices.length ? <Link href="/plan" className={buttonClassName("quiet")}>See choices <ArrowIcon /></Link> : null}
+              {primaryDecision ? (
+                <Link href="/plan" className={buttonClassName("quiet")}>
+                  {primaryDecision.choices.length ? "See choices" : "Review decision"} <ArrowIcon />
+                </Link>
+              ) : null}
             </div>
 
             {!loading && !error && (
@@ -491,7 +614,7 @@ export function TodayScreen() {
                 <summary>Why this is shown</summary>
                 <dl>
                   <div><dt>Known now</dt><dd>{view.known}</dd></div>
-                  <div><dt>Evidence state</dt><dd>{view.status}{primaryDecision ? ` · ${primaryDecision.reply.receipt} · ${primaryDecision.advisorVersion}` : " · no open decision"}</dd></div>
+                  <div><dt>Evidence state</dt><dd>{view.status}{primaryDecision ? ` · ${primaryDecision.reply.receipt} · ${primaryDecision.advisorVersion}` : continuityCheckin ? ` · ${continuityCheckin.response.receipt}` : " · no open decision"}</dd></div>
                   <div><dt>What changes it</dt><dd>{view.changes}</dd></div>
                   {primaryDecision?.refused && <div><dt>Not claimed</dt><dd>{primaryDecision.refused}</dd></div>}
                 </dl>
@@ -500,8 +623,8 @@ export function TodayScreen() {
           </div>
 
           {!loading && !error ? (
-            primaryDecision && perspectives[0]
-              ? <PerspectivePath item={perspectives[0]} nextLabel={nextLabelFor(primaryDecision)} />
+            perspectives[0]
+              ? <PerspectivePath item={perspectives[0]} nextLabel={primaryDecision ? nextLabelFor(primaryDecision) : pendingCheckin ? "Add one detail" : "Recorded response"} />
               : <EmptyPath />
           ) : null}
           {!loading && !error ? <Perspectives items={perspectives} /> : null}

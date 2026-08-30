@@ -50,6 +50,22 @@ const schema = z.object({
   }
 });
 
+interface ResponseIntent {
+  readonly choice: string;
+  readonly note: string | null;
+  readonly wasOverride: boolean;
+  readonly overrideReason: string | null;
+}
+
+interface StoredResponse extends ResponseIntent {
+  readonly responseId: string;
+  readonly respondedAt: Date;
+}
+
+type ResponseOutcome =
+  | { readonly problem: Response }
+  | (StoredResponse & { readonly replayed: boolean });
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -85,8 +101,15 @@ export async function POST(
     );
   }
 
+  const intent: ResponseIntent = {
+    choice: acknowledge ? "Acknowledged" : (choice as string),
+    note: note ?? null,
+    wasOverride: acknowledge ? false : wasOverride,
+    overrideReason: acknowledge ? null : (overrideReason ?? null),
+  };
+
   try {
-    const outcome: { problem: Response } | { responseId: string } = await db()
+    const outcome: ResponseOutcome = await db()
       .transaction()
       .execute(async (trx) => {
         // The decision row is the lock. Two responders to the same decision must
@@ -106,6 +129,55 @@ export async function POST(
           .executeTakeFirst();
 
         if (!decision) return { problem: problem(404, "No such decision.") } as const;
+
+        const offered = Array.isArray(decision.choices) ? (decision.choices as string[]) : [];
+        const canAcknowledge =
+          offered.length === 0 &&
+          (decision.type === "route_out" ||
+            decision.type === "data_quality_block" ||
+            decision.route_destination !== null);
+
+        if (acknowledge && !canAcknowledge) {
+          return {
+            problem: problem(
+              400,
+              "Only a no-choice safety route or data-quality block can be acknowledged.",
+            ),
+          } as const;
+        }
+
+        // `choice` is required by schema when this is not an acknowledgment.
+        if (!acknowledge && !offered.includes(intent.choice) && !wasOverride) {
+          return {
+            problem: problem(
+              400,
+              `"${intent.choice}" was not one of the offered choices. Send wasOverride with a reason to record it anyway.`,
+            ),
+          } as const;
+        }
+
+        const existing = await trx
+          .selectFrom("ashwini.decision_responses")
+          .select([
+            "response_id",
+            "responded_ts",
+            "choice",
+            "note",
+            "was_override",
+            "override_reason",
+          ])
+          .where("decision_id", "=", id)
+          .executeTakeFirst();
+        if (existing) {
+          if (sameResponseIntent(existing, intent)) {
+            return { ...toStoredResponse(existing), replayed: true } as const;
+          }
+          return { problem: problem(409, "That decision has already been answered.") } as const;
+        }
+
+        // A response that already landed remains safely replayable after the
+        // decision expires or its source is corrected. These checks apply only
+        // to a new mutation.
         if (decision.expires_at && decision.expires_at <= new Date()) {
           return {
             problem: problem(409, "That decision has expired and is no longer open."),
@@ -136,71 +208,114 @@ export async function POST(
           }
         }
 
-        const existing = await trx
-          .selectFrom("ashwini.decision_responses")
-          .select("response_id")
-          .where("decision_id", "=", id)
-          .executeTakeFirst();
-        if (existing) {
-          return { problem: problem(409, "That decision has already been answered.") } as const;
-        }
-
-        const offered = Array.isArray(decision.choices) ? (decision.choices as string[]) : [];
-        const canAcknowledge =
-          offered.length === 0 &&
-          (decision.type === "route_out" ||
-            decision.type === "data_quality_block" ||
-            decision.route_destination !== null);
-
-        if (acknowledge && !canAcknowledge) {
-          return {
-            problem: problem(
-              400,
-              "Only a no-choice safety route or data-quality block can be acknowledged.",
-            ),
-          } as const;
-        }
-
-        // `choice` is required by schema when this is not an acknowledgment.
-        const recordedChoice = acknowledge ? "Acknowledged" : (choice as string);
-        if (!acknowledge && !offered.includes(recordedChoice) && !wasOverride) {
-          return {
-            problem: problem(
-              400,
-              `"${recordedChoice}" was not one of the offered choices. Send wasOverride with a reason to record it anyway.`,
-            ),
-          } as const;
-        }
-
         const response = await trx
           .insertInto("ashwini.decision_responses")
           .values({
             decision_id: id,
-            responded_ts: new Date(),
-            choice: recordedChoice,
-            note: note ?? null,
-            was_override: acknowledge ? false : wasOverride,
-            override_reason: acknowledge ? null : (overrideReason ?? null),
+            choice: intent.choice,
+            note: intent.note,
+            was_override: intent.wasOverride,
+            override_reason: intent.overrideReason,
           })
-          .returning("response_id")
+          .returning(["response_id", "responded_ts"])
           .executeTakeFirstOrThrow();
 
-        return { responseId: response.response_id } as const;
+        return {
+          responseId: response.response_id,
+          respondedAt: response.responded_ts,
+          ...intent,
+          replayed: false,
+        } as const;
       });
 
     if ("problem" in outcome) return outcome.problem;
 
-    return Response.json(
-      { responseId: outcome.responseId },
-      { status: 201, headers: { "cache-control": "no-store" } },
-    );
+    return responseResult(outcome, outcome.replayed ? 200 : 201);
   } catch (error) {
     if (isUniqueViolation(error)) {
+      // Every application writer locks the decision first, so this is mainly
+      // defense against a future script that relies only on the unique index.
+      // If it wrote the same intent, recover the committed result; otherwise
+      // preserve the immutable conflict.
+      try {
+        const existing = await loadStoredResponse(id);
+        if (existing && sameResponseIntent(existing, intent)) {
+          return responseResult(existing, 200);
+        }
+      } catch (readError) {
+        console.error("Decision response recovery failed", readError);
+        return problem(503, "The response was recorded, but could not be read back just now.");
+      }
       return problem(409, "That decision has already been answered.");
     }
     console.error("Decision response write failed", error);
     return problem(503, "The response could not be recorded just now.");
   }
+}
+
+async function loadStoredResponse(decisionId: string): Promise<StoredResponse | null> {
+  const row = await db()
+    .selectFrom("ashwini.decision_responses")
+    .select([
+      "response_id",
+      "responded_ts",
+      "choice",
+      "note",
+      "was_override",
+      "override_reason",
+    ])
+    .where("decision_id", "=", decisionId)
+    .executeTakeFirst();
+  return row ? toStoredResponse(row) : null;
+}
+
+function toStoredResponse(row: {
+  response_id: string;
+  responded_ts: Date;
+  choice: string;
+  note: string | null;
+  was_override: boolean;
+  override_reason: string | null;
+}): StoredResponse {
+  return {
+    responseId: row.response_id,
+    respondedAt: row.responded_ts,
+    choice: row.choice,
+    note: row.note,
+    wasOverride: row.was_override,
+    overrideReason: row.override_reason,
+  };
+}
+
+function sameResponseIntent(
+  stored: {
+    choice: string;
+    note: string | null;
+    was_override: boolean;
+    override_reason: string | null;
+  } | StoredResponse,
+  intent: ResponseIntent,
+): boolean {
+  const wasOverride = "was_override" in stored ? stored.was_override : stored.wasOverride;
+  const overrideReason =
+    "override_reason" in stored ? stored.override_reason : stored.overrideReason;
+  return (
+    stored.choice === intent.choice &&
+    stored.note === intent.note &&
+    wasOverride === intent.wasOverride &&
+    overrideReason === intent.overrideReason
+  );
+}
+
+function responseResult(response: StoredResponse, status: 200 | 201): Response {
+  return Response.json(
+    {
+      responseId: response.responseId,
+      respondedAt: response.respondedAt.toISOString(),
+      replayed: status === 200,
+    },
+    { status, headers: { "cache-control": "no-store" } },
+  );
 }
 
 function isUniqueViolation(error: unknown): boolean {

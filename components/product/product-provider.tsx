@@ -74,6 +74,38 @@ function displayInput(turn: SubmittedTurn | HistoricTurn, input: string): string
   return turn.text.trim() || input.trim();
 }
 
+function withRecordedDecisionResponse(
+  record: CheckinRecord,
+  decisionId: string,
+  choice: string,
+  respondedAt: string,
+): CheckinRecord {
+  if (record.response.decision?.id !== decisionId) return record;
+  return {
+    ...record,
+    response: {
+      ...record.response,
+      decision: {
+        ...record.response.decision,
+        selectedChoice: choice,
+        respondedAt,
+      },
+    },
+  };
+}
+
+function recordsFromHistory(
+  history: Awaited<ReturnType<typeof fetchHistory>>,
+): readonly CheckinRecord[] {
+  return history.turns.map((turn) =>
+    toRecord(
+      turn,
+      turn.text,
+      history.turns.find((other) => other.correctedBy === turn.userMessageId)?.userMessageId,
+    ),
+  );
+}
+
 export function ProductProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const checkinWriter = useRef<ReturnType<typeof createRetrySafeCheckinWriter> | null>(null);
@@ -100,16 +132,42 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     setError(cause instanceof Error ? cause.message : fallback);
   }, [router]);
 
+  const loadRecordState = useCallback(async (signal?: AbortSignal) => {
+    const [history, decisions] = await Promise.all([
+      fetchHistory(signal ? { signal } : {}),
+      fetchOpenDecisions(signal),
+    ]);
+    if (signal?.aborted) return;
+    setTimeZone(history.timeZone);
+    setCheckins(recordsFromHistory(history));
+    setOpenDecisions(decisions);
+    setError(null);
+  }, []);
+
   const handleMutationFailure = useCallback(
-    (cause: unknown, fallback: string) => {
+    async (cause: unknown, fallback: string) => {
       const status = statusOf(cause);
-      // Validation/conflict responses describe this attempted write, not the
-      // availability of the record the screens already loaded. The screen that
-      // initiated the action renders the error locally.
-      if (status !== null && status >= 400 && status < 500 && status !== 401) return;
-      handleFailure(cause, fallback);
+      if (status === 401) {
+        handleFailure(cause, fallback);
+        return;
+      }
+
+      // A conflict means another immutable write won. Reconcile both history
+      // and open decisions so the UI can show the winning response or
+      // correction instead of merely removing a stale control.
+      if (status === 409) {
+        try {
+          await loadRecordState();
+        } catch (refreshError) {
+          handleFailure(refreshError, "The record changed, but its current state could not be refreshed.");
+        }
+      }
+
+      // Other mutation failures do not make an already-loaded record
+      // unavailable. In particular, uncertain check-in writes retain their
+      // idempotency key and remain retryable from the initiating screen.
     },
-    [handleFailure],
+    [handleFailure, loadRecordState],
   );
 
   useEffect(() => {
@@ -120,17 +178,9 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       fetchOpenDecisions(controller.signal),
     ])
       .then(([history, decisions]) => {
-        const turns = history.turns;
+        if (controller.signal.aborted) return;
         setTimeZone(history.timeZone);
-        setCheckins(
-          turns.map((turn) =>
-            toRecord(
-              turn,
-              turn.text,
-              turns.find((other) => other.correctedBy === turn.userMessageId)?.userMessageId,
-            ),
-          ),
-        );
+        setCheckins(recordsFromHistory(history));
         setOpenDecisions(decisions);
         setError(null);
       })
@@ -172,7 +222,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
 
         return record;
       } catch (cause: unknown) {
-        handleMutationFailure(cause, "The check-in was not recorded.");
+        await handleMutationFailure(cause, "The check-in was not recorded.");
         throw cause;
       } finally {
         setSubmitting(false);
@@ -186,7 +236,12 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       setRespondingDecisionId(decisionId);
       setDecisionReceipt(null);
       try {
-        await respondToOpenDecision(decisionId, choice);
+        const recorded = await respondToOpenDecision(decisionId, choice);
+        setCheckins((current) =>
+          current.map((record) =>
+            withRecordedDecisionResponse(record, decisionId, choice, recorded.respondedAt),
+          ),
+        );
         setOpenDecisions((current) =>
           current.filter((decision) => decision.decisionId !== decisionId),
         );
@@ -205,14 +260,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
           );
         }
       } catch (cause: unknown) {
-        if (statusOf(cause) === 409) {
-          try {
-            setOpenDecisions(await fetchOpenDecisions());
-          } catch (refreshError) {
-            handleFailure(refreshError, "Current decisions could not be refreshed.");
-          }
-        }
-        handleMutationFailure(cause, "The response was not recorded.");
+        await handleMutationFailure(cause, "The response was not recorded.");
         throw cause;
       } finally {
         setRespondingDecisionId(null);
@@ -226,7 +274,17 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       setRespondingDecisionId(decisionId);
       setDecisionReceipt(null);
       try {
-        await acknowledgeOpenDecision(decisionId);
+        const recorded = await acknowledgeOpenDecision(decisionId);
+        setCheckins((current) =>
+          current.map((record) =>
+            withRecordedDecisionResponse(
+              record,
+              decisionId,
+              "Acknowledged",
+              recorded.respondedAt,
+            ),
+          ),
+        );
         setOpenDecisions((current) =>
           current.filter((decision) => decision.decisionId !== decisionId),
         );
@@ -245,14 +303,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
           );
         }
       } catch (cause: unknown) {
-        if (statusOf(cause) === 409) {
-          try {
-            setOpenDecisions(await fetchOpenDecisions());
-          } catch (refreshError) {
-            handleFailure(refreshError, "Current decisions could not be refreshed.");
-          }
-        }
-        handleMutationFailure(cause, "The acknowledgment was not recorded.");
+        await handleMutationFailure(cause, "The acknowledgment was not recorded.");
         throw cause;
       } finally {
         setRespondingDecisionId(null);

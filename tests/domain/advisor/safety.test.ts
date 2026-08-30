@@ -26,6 +26,7 @@ describe("rule order", () => {
     expect(ids).toEqual([
       "crisis",
       "urgent-symptoms",
+      "musculoskeletal-red-flag",
       "pregnancy",
       "skin-lesion",
       "drug-drug",
@@ -33,6 +34,8 @@ describe("rule order", () => {
       "therapy-content",
       "supplement-interaction",
       "symptom-msk",
+      "pre-training-nutrition",
+      "training-decision",
       "medication",
       "nutrition",
       "training-volume",
@@ -129,6 +132,8 @@ describe("PRD 4.4 / 5 — urgent symptoms route out at level 5", () => {
     "one side of my face is drooping",
     "my speech is slurred",
     "sudden numbness down my left arm",
+    "my left arm is suddenly weak",
+    "my left side feels weak",
     "worst headache of my life",
     "i passed out at my desk",
     "i had a seizure",
@@ -156,6 +161,12 @@ describe("PRD 4.4 / 5 — urgent symptoms route out at level 5", () => {
     "i took more pills than i should have",
     "i accidentally took my pills twice",
     "i took a double dose",
+    "i took 9 Tylenol",
+    "i took eight pills",
+    "i swallowed eight pills",
+    "i took 6 sleeping pills",
+    "i took 4 extra pills",
+    "i accidentally took three doses",
   ];
 
   for (const utterance of urgent) {
@@ -197,6 +208,10 @@ describe("PRD 4.4 / 5 — urgent symptoms route out at level 5", () => {
       "I had a seizure as a child",
       "I fainted five years ago",
       "I had fever and a stiff neck last week but it resolved",
+      "If my left arm is suddenly weak, what should I do?",
+      "My left arm is not weak",
+      "What if I took nine Tylenol?",
+      "I did not take nine Tylenol",
     ]) {
       const output = respondSync(advisorInput(text));
       expect(output.trace.ruleId, text).not.toBe("urgent-symptoms");
@@ -226,6 +241,18 @@ describe("PRD 4.4 / 5 — urgent symptoms route out at level 5", () => {
     }
   });
 
+  it("does not treat an ordinary prescribed two-tablet dose as an overdose", () => {
+    for (const text of [
+      "I took two tablets as prescribed",
+      "I took my two prescribed tablets",
+      "I took two pills with breakfast",
+    ]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).not.toBe("urgent-symptoms");
+      expect(output.route, text).not.toBe("emergency");
+    }
+  });
+
   it("routes a distinct current first-person urgent clause", () => {
     for (const text of [
       "My wife is here and I have chest pain",
@@ -239,6 +266,82 @@ describe("PRD 4.4 / 5 — urgent symptoms route out at level 5", () => {
       "I never faint, but I fainted today",
     ]) {
       expect(ruleFor(text), text).toBe("urgent-symptoms");
+    }
+  });
+});
+
+describe("higher-stakes musculoskeletal reports route before training advice", () => {
+  it.each([
+    "My shoulder hurts and I cannot lift my arm",
+    "I cannot lift my arm",
+    "My shoulder hurts after I fell hard",
+    "My shoulder hurts and my hand is numb",
+    "My knee pain is getting worse",
+    "My arm is numb",
+    "My hand is tingling",
+    "I have a weak grip",
+    "My arm is numb after a fall",
+    "I fell on my shoulder and heard a pop",
+  ])("routes %s to a clinician", (text) => {
+    const output = respondSync(advisorInput(text));
+
+    expect(output.trace.ruleId).toBe("musculoskeletal-red-flag");
+    expect(output.route).toBe("clinician");
+    expect(output.reply.kind).toBe("route");
+    expect(output.decisions[0]).toMatchObject({
+      evidenceStatus: "route_out",
+      ladderLevel: 5,
+    });
+    expect(output.decisions[0]?.choices).toEqual([]);
+    expect(output.reply.text).not.toMatch(/choose|swap the session/i);
+  });
+
+  it("keeps a low-risk painful movement in the bounded training rule", () => {
+    expect(ruleFor("My shoulder hurts when I press overhead")).toBe("symptom-msk");
+  });
+
+  it("does not create an owner route from a hypothetical or third-party report", () => {
+    for (const text of [
+      "If my shoulder hurts and my hand is numb, what should I do?",
+      "If my shoulder hurts and I cannot lift my arm",
+      "My dad has shoulder pain and cannot lift his arm",
+      "I used to have shoulder pain and could not lift my arm",
+      "My arm was numb last year",
+      "My hand is not tingling",
+    ]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.route, text).not.toBe("clinician");
+    }
+  });
+
+  it("does not turn an unrelated fall or sound into a health record", () => {
+    for (const text of ["I fell asleep", "I fell behind at work", "I heard pop music"]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).not.toBe("musculoskeletal-red-flag");
+      expect(
+        output.records.some((record) => record.kind === "symptom"),
+        text,
+      ).toBe(false);
+    }
+  });
+
+  it("does not record or route a hypothetical loss of function", () => {
+    const text = "If my shoulder hurts and I cannot lift my arm";
+    const output = respondSync(advisorInput(text));
+
+    expect(output.route).toBeNull();
+    expect(output.records.some((record) => record.kind === "symptom")).toBe(false);
+  });
+
+  it("routes sudden unilateral weakness as an emergency before MSK handling", () => {
+    for (const text of ["My left arm is suddenly weak", "My left side feels weak"]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).toBe("urgent-symptoms");
+      expect(output.route, text).toBe("emergency");
+      expect(
+        output.records.some((record) => record.kind === "symptom"),
+        text,
+      ).toBe(false);
     }
   });
 });
@@ -426,6 +529,12 @@ describe("PRD 11.6 / 7.3 — prescription changes go to the prescriber", () => {
     "should i come off my prescription",
     "is it fine to double the tablet",
     "my dose feels too high, should i lower it",
+    "should i take an extra dose",
+    "can i take another pill",
+    "should i take 20mg instead of 10mg",
+    "should i take it now or tonight",
+    "can i take two pills",
+    "i missed my dose, should i take it now",
   ];
 
   for (const utterance of cases) {
@@ -446,6 +555,11 @@ describe("PRD 11.6 / 7.3 — prescription changes go to the prescriber", () => {
       "I did not change my medication dose",
       "My dad changed his medication dose",
       "Can I give my dad a double dose",
+      "My dad asked if he should take two pills",
+      "I did not take an extra dose",
+      "I should take two pills with breakfast",
+      "Should I take two vitamins",
+      "Should I take a walk now or tonight",
     ]) {
       const output = respondSync(advisorInput(text));
       expect(output.trace.ruleId, text).not.toBe("prescription-change");
@@ -461,6 +575,8 @@ describe("PRD 11.9 — therapy content is inert", () => {
     "i met with my psychiatrist and discussed trauma",
     "in my session today we discussed trauma",
     "in my mental health session we discussed trauma",
+    "i saw my shrink and discussed trauma",
+    "i talked with my psych about trauma",
   ];
 
   for (const utterance of therapyContent) {
@@ -523,6 +639,24 @@ describe("PRD 11.9 — therapy content is inert", () => {
     const input = "In my mental health session we discussed trauma";
     expect(classifySensitiveContent(input)).toBe("therapy-content");
     expect(redactSensitiveContent(input)).toBe(SENSITIVE_REDACTION["therapy-content"]);
+  });
+
+  it("redacts explicit shrink and psych encounter aliases without treating bare words as therapy", () => {
+    for (const input of [
+      "I saw my shrink and discussed trauma",
+      "I talked with my psych about trauma",
+    ]) {
+      expect(classifySensitiveContent(input), input).toBe("therapy-content");
+      expect(redactSensitiveContent(input), input).toBe(SENSITIVE_REDACTION["therapy-content"]);
+    }
+
+    for (const input of [
+      "I studied psych and discussed trauma in class",
+      "The movie called its villain a shrink",
+    ]) {
+      expect(classifySensitiveContent(input), input).toBeNull();
+      expect(redactSensitiveContent(input), input).toBe(input);
+    }
   });
 
   it("leaves ordinary wording unchanged", () => {

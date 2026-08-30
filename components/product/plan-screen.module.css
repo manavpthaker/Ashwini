@@ -313,6 +313,11 @@
   height: 18px;
 }
 
+.planReceipt.planError {
+  color: #7e2630;
+  background: var(--color-route-soft);
+}
+
 .routinesSection,
 .reviewSection,
 .secondarySection {

@@ -7,6 +7,10 @@ import { DOMAIN_LABEL } from "@/domain/domains";
 import { EVIDENCE_LABEL, EVIDENCE_MEANING, EVIDENCE_STATUSES } from "@/domain/evidence";
 import { buttonClassName, Eyebrow, Status, type StatusTone } from "@/components/design-system/ui";
 import {
+  decisionControlCopy,
+  latestRecordedDecisionResponse,
+} from "@/components/product/decision-control";
+import {
   ArrowIcon,
   CheckIcon,
   ClockIcon,
@@ -71,6 +75,7 @@ function formatDateTime(iso: string, timeZone: string): string {
 export function PlanScreen() {
   const router = useRouter();
   const {
+    checkins,
     openDecisions,
     respondToDecision,
     acknowledgeDecision,
@@ -88,6 +93,12 @@ export function PlanScreen() {
     readonly text: string;
   } | null>(null);
   const decision = !recordLoading && !recordError ? openDecisions[0] : undefined;
+  const latestRecordedResponse = useMemo(
+    () => latestRecordedDecisionResponse(checkins),
+    [checkins],
+  );
+  const recordedChoice = latestRecordedResponse?.response.decision?.selectedChoice;
+  const controlCopy = decision ? decisionControlCopy(decision) : null;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -232,6 +243,30 @@ export function PlanScreen() {
                 </dl>
               </details>
             </>
+          ) : recordedChoice ? (
+            <div className={styles.emptyState}>
+              <div className={styles.decisionTopline}>
+                <Status tone={recordedChoice === "Acknowledged" ? "neutral" : "training"}>
+                  Recorded response
+                </Status>
+                {latestRecordedResponse?.response.decision?.respondedAt && (
+                  <span>
+                    <ClockIcon />
+                    {formatDateTime(
+                      latestRecordedResponse.response.decision.respondedAt,
+                      recordTimeZone,
+                    )}
+                  </span>
+                )}
+              </div>
+              <Eyebrow>Latest completed decision</Eyebrow>
+              <h2 id="current-decision-title">{recordedChoice}</h2>
+              <p>
+                {recordedChoice === "Acknowledged"
+                  ? "The prompt is closed in Ashwini; the underlying concern is not marked resolved."
+                  : "This response remains attached to the check-in that produced the decision."}
+              </p>
+            </div>
           ) : (
             <div className={styles.emptyState}>
               <Eyebrow>Current decisions</Eyebrow>
@@ -253,7 +288,9 @@ export function PlanScreen() {
                 : decision
                   ? decision.choices.length
                     ? "Your available responses"
-                    : "Acknowledge this prompt"
+                    : controlCopy?.heading
+                  : recordedChoice
+                    ? "Response recorded"
                   : "Nothing to answer"}
           </h3>
           <p>
@@ -261,10 +298,10 @@ export function PlanScreen() {
               ? "No response can be recorded until the private record read completes."
               : recordError
                 ? "Ashwini cannot establish which decision is current, so no stale response is available."
-                : decision
-              ? decision.choices.length > 0
-                ? "These are the exact choices stored with this decision. Selecting one writes a durable response to the record."
-                : "Contact the named professional yourself; Ashwini has not sent a handoff. Acknowledging closes this prompt in the app but does not mark the concern resolved."
+              : decision
+              ? controlCopy?.description
+              : recordedChoice
+                ? `Your latest recorded response is “${recordedChoice}.” Add a new check-in if the situation changes.`
               : "A choice panel appears only when a saved decision includes choices."}
           </p>
           {decision?.choices.length ? (
@@ -306,30 +343,39 @@ export function PlanScreen() {
                   <CheckIcon />
                 </i>
                 <span>
-                  <strong>Mark as acknowledged</strong>
-                  <small>Close this prompt only; do not record the concern as resolved.</small>
+                  <strong>{controlCopy?.actionLabel}</strong>
+                  <small>{controlCopy?.description}</small>
                 </span>
               </button>
             </div>
           ) : null}
-          <div className={styles.planReceipt} role="status" aria-live="polite">
-            {choiceError && choiceError.decisionId === decision?.decisionId && (
-              <>
-                <InfoIcon />
-                <span>{choiceError.text}</span>
-              </>
-            )}
-          </div>
         </div>
       </section>
 
-      <div className={styles.planReceipt} role="status" aria-live="polite">
-        {decisionReceipt ? (
+      <div
+        className={`${styles.planReceipt} ${choiceError ? styles.planError : ""}`}
+        role={choiceError ? "alert" : "status"}
+        aria-live={choiceError ? "assertive" : "polite"}
+      >
+        {choiceError ? (
+          <>
+            <InfoIcon />
+            <span>
+              {choiceError.text}
+              {recordedChoice ? ` Current record: “${recordedChoice}.”` : ""}
+            </span>
+          </>
+        ) : decisionReceipt ? (
           <>
             <CheckIcon />
             <span>
               {decisionReceipt.text} · decision {decisionReceipt.decisionId.slice(0, 8)}
             </span>
+          </>
+        ) : decision && recordedChoice ? (
+          <>
+            <CheckIcon />
+            <span>Latest recorded response · {recordedChoice}</span>
           </>
         ) : null}
       </div>

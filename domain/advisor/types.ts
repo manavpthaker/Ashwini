@@ -119,7 +119,12 @@ export interface DecisionDraft {
 export type RecordDraft =
   | { readonly kind: "context_note"; readonly text: string }
   | { readonly kind: "symptom"; readonly text: string; readonly bodyRegion: string | null }
-  | { readonly kind: "meal"; readonly mealKind: MealSummary["kind"] | null }
+  | {
+      readonly kind: "meal";
+      readonly mealKind: MealSummary["kind"] | null;
+      /** The user's own description, never a generated nutrition estimate. */
+      readonly description: string | null;
+    }
   | { readonly kind: "medication_event"; readonly text: string }
   | {
       readonly kind: "dermatology_handoff";

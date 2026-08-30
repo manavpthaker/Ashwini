@@ -67,6 +67,38 @@ export async function POST(request: Request): Promise<Response> {
       ...(parsed.data.correctionOf ? { correctionOf: parsed.data.correctionOf } : {}),
     });
 
+    // A delayed offline retry can arrive after the user has already answered
+    // the decision created by this check-in. Replaying the immutable turn with
+    // `response: null` would make the same idempotency key return a false,
+    // earlier state. Read the durable response only for replays; a newly created
+    // decision cannot have been exposed to a responder yet.
+    const persistedResponses =
+      result.replayed && result.decisionIds.length > 0
+        ? await db()
+            .selectFrom("ashwini.decision_responses")
+            .select(["decision_id", "choice", "responded_ts"])
+            .where("decision_id", "in", result.decisionIds)
+            .execute()
+        : [];
+    const responseByDecisionId = new Map(
+      persistedResponses.map((response) => [response.decision_id, response]),
+    );
+
+    const decisions = result.output.decisions.map((decision, index) => {
+      const decisionId = result.decisionIds[index];
+      if (!decisionId) {
+        throw new Error("A persisted decision is missing its durable identifier.");
+      }
+      const response = responseByDecisionId.get(decisionId);
+      return {
+        ...decision,
+        decisionId,
+        response: response
+          ? { choice: response.choice, respondedAt: response.responded_ts.toISOString() }
+          : null,
+      };
+    });
+
     return Response.json(
       {
         userMessageId: result.userMessageId,
@@ -80,7 +112,7 @@ export async function POST(request: Request): Promise<Response> {
         // PRD 11.10: every model-generated output carries its evidence status
         // and provenance. Non-optional here, so a client cannot render a
         // recommendation without the label that qualifies it.
-        decisions: result.output.decisions,
+        decisions,
         // Kinds only. PRD 4.3 wants the user shown what was recorded, and the
         // kind is the whole of that; the drafts also carry the user's own
         // wording, which does not need a round trip to be displayed.
@@ -173,6 +205,7 @@ export async function GET(request: Request): Promise<Response> {
             .selectFrom("ashwini.decisions")
             .select([
               "message_id",
+              "decision_id",
               "type",
               "domain",
               "evidence_status",
@@ -194,9 +227,22 @@ export async function GET(request: Request): Promise<Response> {
         .execute(),
     ]);
 
+    const decisionIds = decisions.map((decision) => decision.decision_id);
+    const decisionResponses =
+      decisionIds.length === 0
+        ? []
+        : await kysely
+            .selectFrom("ashwini.decision_responses")
+            .select(["decision_id", "choice", "responded_ts"])
+            .where("decision_id", "in", decisionIds)
+            .execute();
+
     const replyByUserId = new Map(replies.map((reply) => [reply.in_reply_to, reply]));
     const decisionsByAdvisorId = groupBy(decisions, (row) => row.message_id);
     const routedByUserId = groupBy(routed, (row) => row.message_id);
+    const responseByDecisionId = new Map(
+      decisionResponses.map((response) => [response.decision_id, response]),
+    );
 
     const turns = userMessages.map((message) => {
       const reply = replyByUserId.get(message.message_id);
@@ -213,6 +259,7 @@ export async function GET(request: Request): Promise<Response> {
         },
         reply: reply ? { text: reply.text, kind: reply.kind, receipt: reply.receipt ?? "" } : null,
         decisions: rows.map((row) => ({
+          decisionId: row.decision_id,
           type: row.type,
           domain: row.domain,
           evidenceStatus: row.evidence_status,
@@ -221,7 +268,17 @@ export async function GET(request: Request): Promise<Response> {
           confidenceNote: row.confidence_note,
           target: row.target,
           refused: row.refused,
-          choices: row.choices,
+          choices: Array.isArray(row.choices)
+            ? row.choices.filter((choice): choice is string => typeof choice === "string")
+            : [],
+          response: responseByDecisionId.has(row.decision_id)
+            ? {
+                choice: responseByDecisionId.get(row.decision_id)!.choice,
+                respondedAt: responseByDecisionId
+                  .get(row.decision_id)!
+                  .responded_ts.toISOString(),
+              }
+            : null,
         })),
         records: (routedByUserId.get(message.message_id) ?? []).map((row) => row.record_kind),
         // A follow-up is asked in the reply itself; it is not stored separately,

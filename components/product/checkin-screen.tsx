@@ -1,10 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { buttonClassName, Button, Eyebrow, Status, type StatusTone } from "@/components/design-system/ui";
-import { ArrowIcon, DocumentIcon, EditIcon, InfoIcon, PhotoIcon, TextIcon, VoiceIcon } from "@/components/product/icons";
+import {
+  checkinFailureNotice,
+  correctionDraft,
+  hasCorrectionChange,
+} from "@/components/product/checkin-ux";
+import { decisionControlCopy } from "@/components/product/decision-control";
+import { ArrowIcon, CheckIcon, DocumentIcon, EditIcon, InfoIcon, PhotoIcon, TextIcon, VoiceIcon } from "@/components/product/icons";
 import { useProduct } from "@/components/product/product-provider";
+import { ConversationError } from "@/lib/checkin-client";
 import type { CheckinRecord, PerspectiveTone } from "@/lib/product-model";
 import type { OpenDecision } from "@/lib/record-client";
 import { hasMeaningfulCheckinInput } from "@/lib/checkin-input";
@@ -13,12 +20,17 @@ import styles from "./checkin-screen.module.css";
 // Openers, not fixtures. The advisor classifies whatever is typed, so these are
 // only here to show the range of things a check-in can be.
 const quickPrompts = [
-  "I ate lunch",
-  "Slept badly, feeling flat today",
-  "My shoulder hurts when I press overhead",
-  "Took my morning meds",
+  "I slept badly and need to decide how to handle training today.",
+  "My shoulder hurts when I press overhead—what should I avoid?",
+  "I took my morning medication; help me keep the record accurate.",
+  "What should I eat before training?",
   "Can I take magnesium with what I'm on?",
 ] as const;
+
+interface ComposerNotice {
+  readonly tone: "info" | "error";
+  readonly text: string;
+}
 
 function responseTone(record: CheckinRecord): StatusTone {
   if (record.response.kind === "route-out") return "route";
@@ -27,18 +39,57 @@ function responseTone(record: CheckinRecord): StatusTone {
   return "neutral";
 }
 
-function currentPlan(decision: OpenDecision | undefined, loading: boolean, error: string | null) {
+function currentPlan(
+  decision: OpenDecision | undefined,
+  latest: CheckinRecord | undefined,
+  loading: boolean,
+  error: string | null,
+) {
   if (loading) return "Opening your private record…";
   if (error) return "Current record unavailable";
-  if (!decision) return "No open decision. Add a check-in when something changes.";
-  return decision.target ?? decision.reply.receipt ?? "Open decision recorded";
+  if (decision) return decision.target ?? decision.reply.receipt ?? "Open decision recorded";
+  if (latest?.response.decision?.selectedChoice) {
+    return `Recorded · ${latest.response.decision.selectedChoice}`;
+  }
+  if (latest?.response.kind === "follow-up") return latest.response.headline;
+  return "No open decision. Add a check-in when something changes.";
+}
+
+function stepLabel(record: CheckinRecord): string {
+  if (record.response.decision?.selectedChoice) return "Original prompt";
+  if (record.response.kind === "follow-up") return "One thing I need";
+  if (record.response.kind === "route-out") return "What to do now";
+  if (record.response.kind === "record") return "What this made useful";
+  return "Do this next";
 }
 
 function PerspectiveChip({ tone, children }: { tone: PerspectiveTone; children: string }) {
   return <span className={`${styles.perspectiveChip} ${styles[tone]}`}>{children}</span>;
 }
 
-function LatestResponse({ record, onCorrect }: { record: CheckinRecord; onCorrect: () => void }) {
+function LatestResponse({
+  record,
+  openDecision,
+  responding,
+  decisionNotice,
+  decisionError,
+  onChoose,
+  onAcknowledge,
+  onCorrect,
+  onAddDetail,
+}: {
+  record: CheckinRecord;
+  openDecision: OpenDecision | undefined;
+  responding: boolean;
+  decisionNotice: string | null;
+  decisionError: string | null;
+  onChoose: (choice: string) => void;
+  onAcknowledge: () => void;
+  onCorrect: () => void;
+  onAddDetail: () => void;
+}) {
+  const selectedChoice = record.response.decision?.selectedChoice;
+  const controlCopy = openDecision ? decisionControlCopy(openDecision) : null;
   return (
     <article className={`${styles.latestResponse} ${record.response.kind === "route-out" ? styles.routeOut : ""}`} aria-labelledby={`response-${record.id}`}>
       <div className={styles.responseTopline}>
@@ -48,10 +99,71 @@ function LatestResponse({ record, onCorrect }: { record: CheckinRecord; onCorrec
 
       <h2 id={`response-${record.id}`}>{record.response.headline}</h2>
       <div className={styles.bedsideSequence}>
+        <p><strong>I heard</strong>{record.originalInput}</p>
         {record.response.acknowledgement && <p><strong>Acknowledged</strong>{record.response.acknowledgement}</p>}
         {record.response.interpretation && <p><strong>Careful read</strong>{record.response.interpretation}</p>}
-        <p><strong>Next step</strong>{record.response.recommendation}</p>
+        <p><strong>{stepLabel(record)}</strong>{record.response.recommendation}</p>
       </div>
+
+      {openDecision ? (
+        <section className={styles.inlineDecision} aria-labelledby={`decision-${record.id}`}>
+          <div>
+            <span>Act on this check-in</span>
+            <h3 id={`decision-${record.id}`}>{controlCopy?.heading}</h3>
+            <p>{controlCopy?.description}</p>
+          </div>
+          <div className={styles.inlineChoices}>
+            {openDecision.choices.length > 0 ? (
+              openDecision.choices.map((choice) => (
+                <button
+                  type="button"
+                  key={choice}
+                  disabled={responding}
+                  onClick={() => onChoose(choice)}
+                >
+                  <CheckIcon />
+                  <span>{choice}</span>
+                </button>
+              ))
+            ) : (
+              <button type="button" disabled={responding} onClick={onAcknowledge}>
+                <CheckIcon />
+                <span>{controlCopy?.actionLabel}</span>
+              </button>
+            )}
+          </div>
+        </section>
+      ) : selectedChoice ? (
+        <div className={styles.recordedChoice} role="status">
+          <CheckIcon />
+          <div>
+            <span>Your recorded response</span>
+            <strong>{selectedChoice}</strong>
+            {selectedChoice === "Acknowledged" && (
+              <small>The prompt is closed; the underlying concern is not marked resolved.</small>
+            )}
+          </div>
+        </div>
+      ) : record.response.kind === "follow-up" ? (
+        <div className={styles.followUpAction}>
+          <div>
+            <span>Complete this check-in</span>
+            <strong>Add the missing detail to the record you already started.</strong>
+          </div>
+          <Button variant="primary" onClick={onAddDetail}>
+            Add this detail <ArrowIcon />
+          </Button>
+        </div>
+      ) : null}
+
+      {(decisionError || decisionNotice) && (
+        <p
+          className={`${styles.decisionFeedback} ${decisionError ? styles.decisionFeedbackError : ""}`}
+          role={decisionError ? "alert" : "status"}
+        >
+          {decisionError ?? decisionNotice}
+        </p>
+      )}
 
       {record.response.perspectives.length > 0 && (
         <div className={styles.usedPerspectives}>
@@ -80,7 +192,7 @@ function LatestResponse({ record, onCorrect }: { record: CheckinRecord; onCorrec
 
       <div className={styles.responseActions}>
         <Button variant="secondary" onClick={onCorrect}><EditIcon />Correct this</Button>
-        <Link className={buttonClassName("quiet")} href="/plan">See the plan <ArrowIcon /></Link>
+        <Link className={buttonClassName("quiet")} href="/">See Today <ArrowIcon /></Link>
       </div>
     </article>
   );
@@ -105,6 +217,9 @@ function HistoryRecord({
       <div>
         <p>{[record.response.acknowledgement, record.response.interpretation].filter(Boolean).join(" ")}</p>
         <strong>{record.response.recommendation}</strong>
+        {record.response.decision?.selectedChoice && (
+          <small>Recorded response · {record.response.decision.selectedChoice}</small>
+        )}
         {!superseded && <Button variant="quiet" onClick={() => onCorrect(record)}><EditIcon />Correct this record</Button>}
       </div>
     </details>
@@ -112,23 +227,133 @@ function HistoryRecord({
 }
 
 export function CheckinScreen() {
-  const { checkins, openDecisions, submitCheckin, loading, submitting, error } = useProduct();
+  const {
+    checkins,
+    openDecisions,
+    submitCheckin,
+    respondToDecision,
+    acknowledgeDecision,
+    loading,
+    submitting,
+    respondingDecisionId,
+    error,
+    decisionReceipt,
+  } = useProduct();
   const [draft, setDraft] = useState("");
   const [latestId, setLatestId] = useState<string | null>(null);
+  const [responseFocusId, setResponseFocusId] = useState<string | null>(null);
   const [correctionOf, setCorrectionOf] = useState<string | undefined>();
+  const [addingCorrectionDetail, setAddingCorrectionDetail] = useState(false);
   const [modeNotice, setModeNotice] = useState("");
+  const [composerNotice, setComposerNotice] = useState<ComposerNotice | null>(null);
+  const [decisionError, setDecisionError] = useState<{
+    decisionId: string;
+    text: string;
+  } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const responseRef = useRef<HTMLDivElement>(null);
+  const consumedCompletionId = useRef<string | null>(null);
   const latest = useMemo(() => checkins.find((record) => record.id === latestId) ?? checkins.at(-1), [checkins, latestId]);
+  const latestDecision = useMemo(
+    () => openDecisions.find((decision) => decision.sourceMessageId === latest?.id),
+    [latest, openDecisions],
+  );
   const correctionTarget = useMemo(() => checkins.find((record) => record.id === correctionOf), [checkins, correctionOf]);
   const supersededIds = useMemo(() => new Set(checkins.flatMap((record) => record.correctionOf ? [record.correctionOf] : [])), [checkins]);
-  const canSubmit = hasMeaningfulCheckinInput(draft) && !submitting && !loading && !error;
+  const correctionIsReady = correctionTarget
+    ? hasCorrectionChange(draft, correctionTarget, addingCorrectionDetail)
+    : true;
+  const canSubmit =
+    hasMeaningfulCheckinInput(draft) &&
+    correctionIsReady &&
+    !submitting &&
+    !loading &&
+    !error;
+  const firstRun = !loading && !error && checkins.length === 0;
 
   useEffect(() => {
-    if (!latestId) return;
+    if (!responseFocusId) return;
     const frame = window.requestAnimationFrame(() => responseRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [latestId]);
+  }, [responseFocusId]);
+
+  const prepareCorrection = useCallback((record: CheckinRecord, addDetail = false) => {
+    setLatestId(record.id);
+    setCorrectionOf(record.id);
+    setAddingCorrectionDetail(addDetail);
+    setDraft(correctionDraft(record, addDetail));
+    setComposerNotice(null);
+    setModeNotice("");
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const cancelCorrection = () => {
+    setCorrectionOf(undefined);
+    setAddingCorrectionDetail(false);
+    setDraft("");
+    setComposerNotice({ tone: "info", text: "Correction cancelled. The saved record was not changed." });
+    textareaRef.current?.focus();
+  };
+
+  const startPrompt = (prompt: string) => {
+    const wasCorrecting = Boolean(correctionOf);
+    setCorrectionOf(undefined);
+    setAddingCorrectionDetail(false);
+    setDraft(prompt);
+    setModeNotice("");
+    setComposerNotice(
+      wasCorrecting
+        ? { tone: "info", text: "Started a new check-in. The earlier record will not be changed." }
+        : null,
+    );
+    textareaRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (loading || error || typeof window === "undefined") return;
+    const requestedId = new URL(window.location.href).searchParams.get("complete");
+    if (!requestedId || consumedCompletionId.current === requestedId) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (consumedCompletionId.current === requestedId) return;
+      consumedCompletionId.current = requestedId;
+
+      const record = checkins.find((item) => item.id === requestedId);
+      if (!record) {
+        setComposerNotice({
+          tone: "error",
+          text: "That pending check-in is not in the loaded history. Choose the correct record below before adding detail.",
+        });
+        return;
+      }
+      if (supersededIds.has(record.id)) {
+        setLatestId(record.id);
+        setComposerNotice({
+          tone: "info",
+          text: "That check-in already has a correction. Its original wording remains visible in history.",
+        });
+        return;
+      }
+      if (
+        record.response.kind !== "follow-up" ||
+        record.response.decision?.selectedChoice
+      ) {
+        setLatestId(record.id);
+        setComposerNotice({
+          tone: "info",
+          text: "That check-in is no longer waiting for detail. Review its current outcome below.",
+        });
+        return;
+      }
+
+      prepareCorrection(record, true);
+      setComposerNotice({
+        tone: "info",
+        text: `Adding the requested detail to the ${record.time || "selected"} check-in. Edit the wording below, then save it as a correction.`,
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [checkins, error, loading, prepareCorrection, supersededIds]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -136,25 +361,50 @@ export function CheckinScreen() {
     let record: CheckinRecord;
     try {
       record = await submitCheckin(draft, correctionOf);
-    } catch {
+    } catch (cause) {
       // The draft is deliberately left in the textarea. A failed write must not
       // also cost the user their wording.
-      setModeNotice(
-        "That check-in could not be confirmed. Your wording is still here — retrying the unchanged draft will not create a second record.",
-      );
+      if (cause instanceof ConversationError && cause.status === 409) {
+        setCorrectionOf(undefined);
+        setAddingCorrectionDetail(false);
+      }
+      setComposerNotice({ tone: "error", text: checkinFailureNotice(cause) });
       return;
     }
     setLatestId(record.id);
+    setResponseFocusId(record.id);
     setDraft("");
     setCorrectionOf(undefined);
+    setAddingCorrectionDetail(false);
+    setComposerNotice(null);
+    setDecisionError(null);
     setModeNotice("");
   };
 
-  const prepareCorrection = (record = latest) => {
-    if (!record) return;
-    setCorrectionOf(record.id);
-    setDraft("Correction: ");
-    textareaRef.current?.focus();
+  const choose = async (choice: string) => {
+    if (!latestDecision) return;
+    setDecisionError(null);
+    try {
+      await respondToDecision(latestDecision.decisionId, choice);
+    } catch (cause) {
+      setDecisionError({
+        decisionId: latestDecision.decisionId,
+        text: cause instanceof Error ? cause.message : "The response was not recorded.",
+      });
+    }
+  };
+
+  const acknowledge = async () => {
+    if (!latestDecision) return;
+    setDecisionError(null);
+    try {
+      await acknowledgeDecision(latestDecision.decisionId);
+    } catch (cause) {
+      setDecisionError({
+        decisionId: latestDecision.decisionId,
+        text: cause instanceof Error ? cause.message : "The acknowledgment was not recorded.",
+      });
+    }
   };
 
   const showUnavailableMode = (label: string) => {
@@ -166,12 +416,12 @@ export function CheckinScreen() {
       <header className={styles.pageHeader}>
         <div>
           <Eyebrow>One check-in · relevant perspectives</Eyebrow>
-          <h1 id="page-title" tabIndex={-1}>What changed?</h1>
+          <h1 id="page-title" tabIndex={-1}>{firstRun ? "What do you need help with today?" : "What changed?"}</h1>
           <p>Share what happened without choosing a provider, domain, or form. Ashwini records the input, uses only the relevant reasoning lenses, and returns one coordinated next step when the evidence supports one.</p>
         </div>
         <aside>
           <span>Current plan</span>
-          <strong>{currentPlan(openDecisions[0], loading, error)}</strong>
+          <strong>{currentPlan(openDecisions[0], latest, loading, error)}</strong>
           <small>Recorded, not monitored · nothing here watches you between check-ins</small>
         </aside>
       </header>
@@ -179,8 +429,8 @@ export function CheckinScreen() {
       <section className={styles.checkinPanel} aria-labelledby="composer-title">
         <div className={styles.composerIntro}>
           <Eyebrow>Check-in</Eyebrow>
-          <h2 id="composer-title">What’s going on?</h2>
-          <p>Say what changed in your own words. Ashwini records it, classifies it against its safety rules, and returns one next step — or tells you when to contact a qualified person yourself.</p>
+          <h2 id="composer-title">{firstRun ? "Start with the decision or change that matters." : "What’s going on?"}</h2>
+          <p>Say what changed or the choice in front of you. Ashwini returns one bounded action, one useful question, or a clear professional boundary—then keeps that outcome with the record.</p>
           <div className={styles.modeList} aria-label="Check-in modes">
             <span><TextIcon />Text</span>
             <button type="button" onClick={() => showUnavailableMode("Photo")}><PhotoIcon />Photo</button>
@@ -191,18 +441,32 @@ export function CheckinScreen() {
         </div>
 
         <form className={styles.composer} onSubmit={submit}>
-          {correctionTarget && <div className={styles.correctionFlag}><EditIcon />Correcting {correctionTarget.time}: “{correctionTarget.originalInput}”. The original remains visible.</div>}
+          {correctionTarget && (
+            <div className={styles.correctionFlag}>
+              <span><EditIcon />Correcting {correctionTarget.time}: “{correctionTarget.originalInput}”. The original remains visible.</span>
+              <button type="button" onClick={cancelCorrection}>Cancel correction</button>
+            </div>
+          )}
+          {composerNotice && (
+            <p
+              className={`${styles.composerNotice} ${composerNotice.tone === "error" ? styles.composerNoticeError : ""}`}
+              role={composerNotice.tone === "error" ? "alert" : "status"}
+            >
+              <InfoIcon />{composerNotice.text}
+            </p>
+          )}
           <label htmlFor="checkin-input">Your check-in</label>
           <textarea
             id="checkin-input"
             ref={textareaRef}
             rows={5}
+            maxLength={4000}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Share what changed—food, energy, pain, sleep, medication context, or the decision you need help with."
           />
           <div className={styles.quickPrompts} aria-label="Suggested check-ins">
-            {quickPrompts.map((prompt) => <button type="button" key={prompt} onClick={() => setDraft(prompt)}>{prompt}</button>)}
+            {quickPrompts.map((prompt) => <button type="button" key={prompt} onClick={() => startPrompt(prompt)}>{prompt}</button>)}
           </div>
           <div className={styles.composerFooter}>
             <span>Saved to your record · corrections supersede, nothing is deleted</span>
@@ -213,7 +477,7 @@ export function CheckinScreen() {
                   ? "Opening record…"
                   : error
                     ? "Record unavailable"
-                    : "Record check-in"}{" "}
+                    : "Save check-in and get my read"}{" "}
               <ArrowIcon />
             </Button>
           </div>
@@ -221,7 +485,7 @@ export function CheckinScreen() {
       </section>
 
       {error && (
-        <p className={styles.modeNotice} role="alert">
+        <p className={`${styles.surfaceNotice} ${styles.surfaceNoticeError}`} role="alert">
           <InfoIcon />
           {error} Nothing below is guaranteed current — treat it as unknown rather than as an empty day.
         </p>
@@ -229,7 +493,27 @@ export function CheckinScreen() {
 
       <div ref={responseRef} tabIndex={-1} className={styles.responseFocus}>
         <div className="sr-only" role="status" aria-live="polite">{latestId && latest ? latest.response.receipt : ""}</div>
-        {latest && <LatestResponse record={latest} onCorrect={() => prepareCorrection(latest)} />}
+        {latest && (
+          <LatestResponse
+            record={latest}
+            openDecision={latestDecision}
+            responding={respondingDecisionId === latestDecision?.decisionId}
+            decisionNotice={
+              decisionReceipt && decisionReceipt.decisionId === latest.response.decision?.id
+                ? decisionReceipt.text
+                : null
+            }
+            decisionError={
+              decisionError && decisionError.decisionId === latest.response.decision?.id
+                ? decisionError.text
+                : null
+            }
+            onChoose={(choice) => void choose(choice)}
+            onAcknowledge={() => void acknowledge()}
+            onCorrect={() => prepareCorrection(latest)}
+            onAddDetail={() => prepareCorrection(latest, true)}
+          />
+        )}
       </div>
 
       <section className={styles.historySection} aria-labelledby="history-title">
@@ -239,10 +523,10 @@ export function CheckinScreen() {
         </div>
 
         <div className={styles.historyList}>
-          {loading && <p className={styles.modeNotice} role="status"><InfoIcon />Loading your record…</p>}
+          {loading && <p className={styles.surfaceNotice} role="status"><InfoIcon />Loading your record…</p>}
           {checkins.slice().reverse().map((record) => <HistoryRecord key={record.id} record={record} superseded={supersededIds.has(record.id)} onCorrect={prepareCorrection} />)}
           {!loading && !error && checkins.length === 0 && (
-            <p className={styles.modeNotice}><InfoIcon />No check-ins recorded yet.</p>
+            <p className={styles.surfaceNotice}><InfoIcon />No check-ins recorded yet.</p>
           )}
         </div>
       </section>

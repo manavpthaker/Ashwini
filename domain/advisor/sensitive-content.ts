@@ -59,6 +59,7 @@ function safetyClauses(text: string): readonly string[] {
 
 const THERAPY_PATTERNS: readonly RegExp[] = [
   /\b(?:therapy|therapist|counsell?or|counselling|counseling|psychotherap\w*|psychiatrist|psychologist)\b/,
+  /\b(?:i|we) (?:saw|met with|visited|talked (?:with|to)|spoke (?:with|to)) (?:my|our) (?:shrink|psych)\b/,
   /\bmy (?:mental health|behavio(?:u)?ral health) (?:appointment|session|visit|provider|clinician|professional)\b/,
   /\b(?:appointment|session|visit) with my (?:psychiatrist|psychologist|psychotherapist|therapist|counsell?or|social worker)\b/,
   /\bmy session with\b/,

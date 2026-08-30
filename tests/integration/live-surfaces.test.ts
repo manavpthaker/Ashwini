@@ -15,6 +15,7 @@ describeIfDb("record-backed product surfaces", () => {
   let decisionsGET: typeof import("@/app/api/decisions/route").GET;
   let respondPOST: typeof import("@/app/api/decisions/[id]/respond/route").POST;
   let conversationPOST: typeof import("@/app/api/conversation/route").POST;
+  let conversationGET: typeof import("@/app/api/conversation/route").GET;
 
   beforeAll(async () => {
     (process.env as Record<string, string | undefined>).DATABASE_URL = connectionString;
@@ -32,7 +33,8 @@ describeIfDb("record-backed product surfaces", () => {
     ({ GET: planGET } = await import("@/app/api/plan/route"));
     ({ GET: decisionsGET } = await import("@/app/api/decisions/route"));
     ({ POST: respondPOST } = await import("@/app/api/decisions/[id]/respond/route"));
-    ({ POST: conversationPOST } = await import("@/app/api/conversation/route"));
+    ({ POST: conversationPOST, GET: conversationGET } =
+      await import("@/app/api/conversation/route"));
 
     client = new Client({ connectionString });
     await client.connect();
@@ -122,7 +124,7 @@ describeIfDb("record-backed product surfaces", () => {
     expect(JSON.stringify(body)).not.toMatch(/6h 18m|3:45|4:30|House Dal/);
   });
 
-  it("replays the browser route write when the same idempotency key is retried", async () => {
+  it("replays the browser route with the durable decision response that now exists", async () => {
     const key = `browser-${crypto.randomUUID()}`;
     const text = `I feel flat today ${crypto.randomUUID()}`;
     const request = () =>
@@ -133,20 +135,88 @@ describeIfDb("record-backed product surfaces", () => {
       });
 
     const first = await conversationPOST(request());
-    const second = await conversationPOST(request());
     const firstBody = (await first.json()) as {
       userMessageId: string;
       advisorMessageId: string;
       replayed: boolean;
+      decisions: {
+        decisionId: string;
+        choices: string[];
+        response: { choice: string; respondedAt: string } | null;
+      }[];
     };
-    const secondBody = (await second.json()) as typeof firstBody;
 
     expect(first.status).toBe(201);
-    expect(second.status).toBe(200);
     expect(firstBody.replayed).toBe(false);
+    expect(firstBody.decisions[0]?.response).toBeNull();
+
+    const decisionId = firstBody.decisions[0]?.decisionId as string;
+    const choice = firstBody.decisions[0]?.choices[0] as string;
+    const response = await respondPOST(responseRequest(decisionId, choice), {
+      params: Promise.resolve({ id: decisionId }),
+    });
+    const responseBody = (await response.json()) as {
+      responseId: string;
+      respondedAt: string;
+    };
+    expect(response.status).toBe(201);
+
+    const second = await conversationPOST(request());
+    const secondBody = (await second.json()) as typeof firstBody;
+    expect(second.status).toBe(200);
     expect(secondBody.replayed).toBe(true);
     expect(secondBody.userMessageId).toBe(firstBody.userMessageId);
     expect(secondBody.advisorMessageId).toBe(firstBody.advisorMessageId);
+    expect(secondBody.decisions[0]?.response).toEqual({
+      choice,
+      respondedAt: responseBody.respondedAt,
+    });
+  });
+
+  it("keeps the first useful question and a selected action visible after reload", async () => {
+    const meal = await handleUtterance({ text: "I ate lunch" });
+    expect(meal.output.reply.kind).toBe("question");
+
+    const recovery = await handleUtterance({
+      text: `Slept badly, feeling flat today ${crypto.randomUUID()}`,
+    });
+    const decisionId = recovery.decisionIds[0] as string;
+    const choice = recovery.output.decisions[0]?.choices[0] as string;
+    const written = await respondPOST(responseRequest(decisionId, choice), {
+      params: Promise.resolve({ id: decisionId }),
+    });
+    expect(written.status).toBe(201);
+    expect(await written.json()).toMatchObject({
+      responseId: expect.any(String),
+      respondedAt: expect.any(String),
+    });
+
+    const history = await conversationGET(
+      new Request("http://ashwini.test/api/conversation?limit=200"),
+    );
+    expect(history.status).toBe(200);
+    const body = (await history.json()) as {
+      turns: {
+        userMessage: { messageId: string };
+        reply: { kind: string; text: string } | null;
+        decisions: {
+          decisionId: string;
+          response: { choice: string; respondedAt: string } | null;
+        }[];
+      }[];
+    };
+
+    const mealTurn = body.turns.find((turn) => turn.userMessage.messageId === meal.userMessageId);
+    expect(mealTurn?.reply).toMatchObject({ kind: "question" });
+    expect(mealTurn?.reply?.text).toMatch(/what did you eat/i);
+
+    const recoveryTurn = body.turns.find(
+      (turn) => turn.userMessage.messageId === recovery.userMessageId,
+    );
+    expect(recoveryTurn?.decisions[0]).toMatchObject({
+      decisionId,
+      response: { choice, respondedAt: expect.any(String) },
+    });
   });
 
   it("includes a taken-only PRN dose in Today", async () => {
@@ -398,6 +468,12 @@ describeIfDb("record-backed product surfaces", () => {
       { params: Promise.resolve({ id: decisionId }) },
     );
     expect(written.status).toBe(201);
+    const writtenBody = (await written.json()) as {
+      responseId: string;
+      respondedAt: string;
+      replayed: boolean;
+    };
+    expect(writtenBody.replayed).toBe(false);
 
     const duplicate = await respondPOST(
       new Request(`http://ashwini.test/api/decisions/${decisionId}/respond`, {
@@ -407,7 +483,24 @@ describeIfDb("record-backed product surfaces", () => {
       }),
       { params: Promise.resolve({ id: decisionId }) },
     );
-    expect(duplicate.status).toBe(409);
+    expect(duplicate.status).toBe(200);
+    expect(await duplicate.json()).toEqual({ ...writtenBody, replayed: true });
+
+    const conflict = await respondPOST(
+      new Request(`http://ashwini.test/api/decisions/${decisionId}/respond`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ choice: choices[1] }),
+      }),
+      { params: Promise.resolve({ id: decisionId }) },
+    );
+    expect(conflict.status).toBe(409);
+
+    const stored = await client.query<{ responded_ts: Date }>(
+      "select responded_ts from ashwini.decision_responses where decision_id = $1",
+      [decisionId],
+    );
+    expect(writtenBody.respondedAt).toBe(stored.rows[0]?.responded_ts.toISOString());
 
     const after = await decisionsGET(new Request("http://ashwini.test/api/decisions"));
     const afterBody = (await after.json()) as { decisions: { decisionId: string }[] };
@@ -506,7 +599,7 @@ describeIfDb("record-backed product surfaces", () => {
     expect(stored.rowCount).toBe(0);
   });
 
-  it("serializes two answers to one immutable decision", async () => {
+  it("returns one immutable response to two concurrent identical answers", async () => {
     const decisionId = await insertOpenDecision();
     const responses = await Promise.all([
       respondPOST(responseRequest(decisionId), {
@@ -516,7 +609,36 @@ describeIfDb("record-backed product surfaces", () => {
         params: Promise.resolve({ id: decisionId }),
       }),
     ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 201]);
+    const bodies = await Promise.all(
+      responses.map(
+        async (response) =>
+          (await response.json()) as { responseId: string; respondedAt: string; replayed: boolean },
+      ),
+    );
+    expect(new Set(bodies.map((body) => body.responseId)).size).toBe(1);
+    expect(new Set(bodies.map((body) => body.respondedAt)).size).toBe(1);
+  });
+
+  it("keeps a conflicting concurrent answer immutable", async () => {
+    const choices = ["First concurrent choice", "Second concurrent choice"];
+    const decisionId = await insertOpenDecision({ choices });
+    const responses = await Promise.all([
+      respondPOST(responseRequest(decisionId, choices[0]), {
+        params: Promise.resolve({ id: decisionId }),
+      }),
+      respondPOST(responseRequest(decisionId, choices[1]), {
+        params: Promise.resolve({ id: decisionId }),
+      }),
+    ]);
     expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+
+    const stored = await client.query<{ choice: string }>(
+      "select choice from ashwini.decision_responses where decision_id = $1",
+      [decisionId],
+    );
+    expect(stored.rows).toHaveLength(1);
+    expect(choices).toContain(stored.rows[0]?.choice);
   });
 
   it("rejects an arbitrary response when no choices were offered", async () => {
@@ -540,6 +662,39 @@ describeIfDb("record-backed product surfaces", () => {
     ]);
     expect(expired.status).toBe(409);
     expect(corrected.status).toBe(409);
+  });
+
+  it("replays an identical response that landed before its source was corrected", async () => {
+    const original = await handleUtterance({ text: "my shoulder hurts under load" });
+    const decisionId = original.decisionIds[0] as string;
+    const choices = original.output.decisions[0]?.choices ?? [];
+    const choice = choices[0] as string;
+    const written = await respondPOST(responseRequest(decisionId, choice), {
+      params: Promise.resolve({ id: decisionId }),
+    });
+    const writtenBody = (await written.json()) as {
+      responseId: string;
+      respondedAt: string;
+      replayed: boolean;
+    };
+    expect(written.status).toBe(201);
+
+    await handleUtterance({
+      text: "Correction: it was ordinary post-training soreness, not pain",
+      correctionOf: original.userMessageId,
+    });
+
+    const retry = await respondPOST(responseRequest(decisionId, choice), {
+      params: Promise.resolve({ id: decisionId }),
+    });
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ ...writtenBody, replayed: true });
+
+    const conflict = await respondPOST(
+      responseRequest(decisionId, (choices[1] ?? "Conflicting corrected choice") as string),
+      { params: Promise.resolve({ id: decisionId }) },
+    );
+    expect(conflict.status).toBe(409);
   });
 
   it("does not leave a corrected check-in's decision open", async () => {

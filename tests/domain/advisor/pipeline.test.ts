@@ -66,7 +66,7 @@ describe("the confound gate applied centrally", () => {
     );
 
     expect(output.trace.ruleId).toBe("nutrition");
-    expect(output.reply.receipt).toBe("Meal occurrence recorded · nutrition detail unknown");
+    expect(output.reply.receipt).toBe("Meal occurrence recorded · food detail still unknown");
     expect(output.decisions[0]).toMatchObject({
       evidenceStatus: "recorded",
       ladderLevel: 0,
@@ -74,7 +74,7 @@ describe("the confound gate applied centrally", () => {
     });
   });
 
-  it("does not turn recovery context without a saved session into a verdict", () => {
+  it("keeps a fresh recovery action conservative and caveated", () => {
     const output = respondSync(
       advisorInput("i feel flat today", {
         confoundDefinitions: [
@@ -84,17 +84,18 @@ describe("the confound gate applied centrally", () => {
     );
 
     expect(output.trace.ruleId).toBe("training-volume");
-    expect(output.reply.receipt).toBe("Recovery context recorded · no training plan on file");
+    expect(output.reply.receipt).toBe("Recovery context recorded · optional effort kept flexible");
     expect(output.decisions[0]).toMatchObject({
-      evidenceStatus: "recorded",
-      ladderLevel: 0,
-      gateOutcome: "clear",
+      evidenceStatus: "rule_based",
+      ladderLevel: 2,
+      gateOutcome: "caveated",
     });
   });
 
   it("carries the confounds it checked onto the decision", () => {
     const output = respondSync(
-      advisorInput("my shoulder hurts", {
+      advisorInput("i feel flat today", {
+        commitments: [{ title: "Saved session", domain: "training", startsAt: NOW }],
         confoundDefinitions: [blockingConfound({ blocking: false })],
         confoundEvaluations: [present("illness")],
       }),
@@ -113,9 +114,16 @@ describe("the confound gate applied centrally", () => {
 describe("training context comes from saved commitments", () => {
   it("does not invent a session when no training commitment exists", () => {
     const output = respondSync(advisorInput("i feel flat today"));
-    expect(output.reply.text).toMatch(/no saved training commitment/i);
-    expect(output.decisions[0]?.choices).toEqual([]);
-    expect(output.decisions[0]?.evidenceStatus).toBe("recorded");
+    expect(output.reply.text).toMatch(/no saved session/i);
+    expect(output.decisions[0]?.choices).toEqual([
+      "Keep optional effort flexible today",
+      "Do nothing for now",
+    ]);
+    expect(output.decisions[0]?.evidenceStatus).toBe("rule_based");
+    expect(output.records).toContainEqual({
+      kind: "context_note",
+      text: "i feel flat today",
+    });
   });
 
   it("offers a volume choice only when a training commitment is saved", () => {

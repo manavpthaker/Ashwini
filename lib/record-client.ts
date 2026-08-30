@@ -136,26 +136,34 @@ export async function fetchOpenDecisions(signal?: AbortSignal): Promise<readonly
   return body.decisions;
 }
 
-export async function respondToOpenDecision(decisionId: string, choice: string): Promise<string> {
+export interface RecordedDecisionResponse {
+  readonly responseId: string;
+  readonly respondedAt: string;
+}
+
+export async function respondToOpenDecision(
+  decisionId: string,
+  choice: string,
+): Promise<RecordedDecisionResponse> {
   const response = await fetch(`/api/decisions/${encodeURIComponent(decisionId)}/respond`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ choice }),
   });
   if (!response.ok) await readError(response);
-  const body = (await response.json()) as { responseId: string };
-  return body.responseId;
+  return (await response.json()) as RecordedDecisionResponse;
 }
 
-export async function acknowledgeOpenDecision(decisionId: string): Promise<string> {
+export async function acknowledgeOpenDecision(
+  decisionId: string,
+): Promise<RecordedDecisionResponse> {
   const response = await fetch(`/api/decisions/${encodeURIComponent(decisionId)}/respond`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ acknowledge: true }),
   });
   if (!response.ok) await readError(response);
-  const body = (await response.json()) as { responseId: string };
-  return body.responseId;
+  return (await response.json()) as RecordedDecisionResponse;
 }
 
 export async function fetchTodaySnapshot(signal?: AbortSignal): Promise<TodaySnapshot> {

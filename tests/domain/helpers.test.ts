@@ -151,7 +151,9 @@ describe("meal classification", () => {
   for (const [utterance, expected] of cases) {
     it(`files "${utterance}" as ${expected ?? "an unclassified meal"}`, () => {
       const output = respondSync(advisorInput(utterance));
-      expect(output.records).toContainEqual({ kind: "meal", mealKind: expected });
+      expect(output.records).toContainEqual(
+        expect.objectContaining({ kind: "meal", mealKind: expected }),
+      );
     });
   }
 });

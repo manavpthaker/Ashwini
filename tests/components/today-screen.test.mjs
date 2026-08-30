@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   buildTimeline,
   currentPartOfDay,
+  latestContinuityCheckin,
   needsTodayRefresh,
   nextUpcomingTimelineItem,
 } from "@/components/product/today-screen";
@@ -109,5 +110,82 @@ describe("Today timeline", () => {
 
     expect(nextUpcomingTimelineItem(timeline, new Date("2026-08-30T16:00:00.000Z"))?.id)
       .toBe("session-session");
+  });
+
+  test("keeps a pending question and a recorded choice visible in the timeline", () => {
+    const pending = checkin("pending", "Add one detail");
+    pending.response.kind = "follow-up";
+    const answered = checkin("answered", "Choose how today changes");
+    answered.recordedAt = "2026-08-30T15:30:00.000Z";
+    answered.response.decision = {
+      id: "decision",
+      choices: ["Keep optional effort flexible today", "Do nothing for now"],
+      selectedChoice: "Keep optional effort flexible today",
+      respondedAt: "2026-08-30T15:31:00.000Z",
+    };
+
+    const timeline = buildTimeline(
+      snapshot(),
+      [pending, answered],
+      undefined,
+      new Date("2026-08-30T16:00:00.000Z"),
+    );
+
+    expect(timeline.map((item) => item.state)).toEqual(["current", "current"]);
+    expect(timeline[1]?.detail).toContain("Keep optional effort flexible today");
+  });
+
+  test("treats an acknowledged question as closed rather than still pending", () => {
+    const acknowledged = checkin("acknowledged", "Review missing evidence");
+    acknowledged.response.kind = "follow-up";
+    acknowledged.response.decision = {
+      id: "decision",
+      choices: [],
+      selectedChoice: "Acknowledged",
+      respondedAt: "2026-08-30T15:31:00.000Z",
+    };
+
+    const timeline = buildTimeline(
+      snapshot(),
+      [acknowledged],
+      undefined,
+      new Date("2026-08-30T16:00:00.000Z"),
+    );
+
+    expect(timeline[0]?.state).toBe("complete");
+  });
+});
+
+describe("Today continuity priority", () => {
+  test("shows the newest recorded response ahead of an older pending question", () => {
+    const pending = checkin("pending", "Add one detail");
+    pending.response.kind = "follow-up";
+
+    const answered = checkin("answered", "Choose how today changes");
+    answered.recordedAt = "2026-08-30T14:00:00.000Z";
+    answered.response.decision = {
+      id: "decision",
+      choices: ["Keep optional effort flexible today", "Do nothing for now"],
+      selectedChoice: "Keep optional effort flexible today",
+      respondedAt: "2026-08-30T16:00:00.000Z",
+    };
+
+    expect(latestContinuityCheckin([pending, answered])?.id).toBe("answered");
+  });
+
+  test("shows a genuinely newer pending question ahead of an older response", () => {
+    const answered = checkin("answered", "Earlier response");
+    answered.response.decision = {
+      id: "decision",
+      choices: ["Reduced volume"],
+      selectedChoice: "Reduced volume",
+      respondedAt: "2026-08-30T14:00:00.000Z",
+    };
+
+    const pending = checkin("pending", "New detail needed");
+    pending.recordedAt = "2026-08-30T16:00:00.000Z";
+    pending.response.kind = "follow-up";
+
+    expect(latestContinuityCheckin([answered, pending])?.id).toBe("pending");
   });
 });

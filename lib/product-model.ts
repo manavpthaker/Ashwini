@@ -47,6 +47,13 @@ export interface CheckinResponse {
   recommendation: string;
   followUp?: string;
   receipt: string;
+  /** The exact persisted decision and any immutable response recorded against it. */
+  decision?: {
+    id: string;
+    choices: readonly string[];
+    selectedChoice?: string;
+    respondedAt?: string;
+  };
   recorded: readonly string[];
   perspectives: readonly PerspectiveContribution[];
   effects: CheckinEffect;

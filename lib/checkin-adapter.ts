@@ -43,6 +43,7 @@ export type WireRecordKind =
 
 /** The subset of the PRD 9 decision object the interface renders. */
 export interface WireDecision {
+  readonly decisionId: string;
   readonly type: "recommendation" | "data_quality_block" | "scheduled_review" | "route_out";
   readonly domain: Domain;
   readonly evidenceStatus: DomainEvidenceStatus;
@@ -52,6 +53,10 @@ export interface WireDecision {
   readonly target: string | null;
   readonly refused: string;
   readonly choices: readonly string[];
+  readonly response: {
+    readonly choice: string;
+    readonly respondedAt: string;
+  } | null;
 }
 
 export interface WireReply {
@@ -199,6 +204,20 @@ export function toCheckinResponse(turn: ConversationTurn): CheckinResponse {
     recommendation: turn.reply.text,
     ...(turn.followUp ? { followUp: turn.followUp } : {}),
     receipt: turn.reply.receipt,
+    ...(decision
+      ? {
+          decision: {
+            id: decision.decisionId,
+            choices: decision.choices,
+            ...(decision.response
+              ? {
+                  selectedChoice: decision.response.choice,
+                  respondedAt: decision.response.respondedAt,
+                }
+              : {}),
+          },
+        }
+      : {}),
     recorded: [retainedWordingLabel(turn), ...turn.records.map((kind) => RECORD_LABEL[kind])],
     perspectives: decision ? [perspectiveFor(decision)] : [],
     effects: effectsFor(turn, decision),
