@@ -74,6 +74,7 @@ describe("a public host", () => {
   for (const host of ["VERCEL", "AWS_LAMBDA_FUNCTION_NAME", "NETLIFY"]) {
     it(`refuses the Tailscale gate on ${host}`, async () => {
       setEnv(host, "1");
+      setEnv("DATABASE_URL", "postgres://localhost:5432/ashwini");
       setEnv("ASHWINI_TAILSCALE_USER", "owner@example.com");
 
       // Even presenting the correct identity: on a public host the caller
@@ -87,6 +88,70 @@ describe("a public host", () => {
       expect(body.error).toMatch(/forge/);
     });
   }
+
+  describe("with a database configured but no Supabase auth", () => {
+    beforeEach(() => {
+      setEnv("VERCEL", "1");
+      setEnv("DATABASE_URL", "postgres://localhost:5432/ashwini");
+    });
+
+    it("refuses pages as well as the API", async () => {
+      // A record exists behind this deployment. Nothing is served, including a
+      // page, because a server-rendered one could read it.
+      for (const path of ["/", "/check-in", "/plan", "/login", "/api/conversation"]) {
+        const response = await proxy(request(path));
+        expect(response.status, path).toBe(403);
+      }
+    });
+
+    it("refuses even where the correct tailnet identity is presented", async () => {
+      setEnv("ASHWINI_TAILSCALE_USER", "owner@example.com");
+      const response = await proxy(request("/", { "tailscale-user-login": "owner@example.com" }));
+      expect(response.status).toBe(403);
+    });
+  });
+
+  describe("with no database and no Supabase auth", () => {
+    beforeEach(() => {
+      setEnv("VERCEL", "1");
+    });
+
+    it("serves the prerendered pages, because there is no record behind them", async () => {
+      for (const path of ["/", "/check-in", "/plan", "/login"]) {
+        const response = await proxy(request(path));
+        expect(response.status, path).toBe(200);
+      }
+    });
+
+    it("still refuses every API route", async () => {
+      // The property that makes serving the shell safe: the only path to a
+      // record stays shut, so this does not depend on reading DATABASE_URL
+      // correctly.
+      for (const path of [
+        "/api/conversation",
+        "/api/decisions",
+        "/api/health",
+        "/api/auth/sign-in",
+        "/api/reminders/run",
+      ]) {
+        const response = await proxy(request(path));
+        expect(response.status, path).toBe(403);
+      }
+    });
+
+    it("says why the API is empty rather than repeating the forgery warning", async () => {
+      const response = await proxy(request("/api/conversation"));
+      const body = (await response.json()) as { error: string };
+      expect(body.error).toMatch(/no record connected/);
+      expect(body.error).not.toMatch(/forge/);
+    });
+
+    it("does not serve a page once a database appears", async () => {
+      expect((await proxy(request("/"))).status).toBe(200);
+      setEnv("DATABASE_URL", "postgres://localhost:5432/ashwini");
+      expect((await proxy(request("/"))).status).toBe(403);
+    });
+  });
 
   it("permits a verified Supabase session on Vercel", async () => {
     setEnv("VERCEL", "1");

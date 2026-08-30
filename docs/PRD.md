@@ -1,10 +1,10 @@
 # ashwini Product Requirements Document
 
-**Status:** Check-in-led multidisciplinary advisor direction approved; storage topology amended in §4.8 and §11.3; hosting and access model amended in §4.8 and §11.3
+**Status:** Check-in-led multidisciplinary advisor direction approved; storage topology amended in §4.8 and §11.3; hosting and access model amended in §4.8 and §11.3; the record/interface distinction amended in §4.8 and §11.3
 
-**Version:** 0.7
+**Version:** 0.8
 
-> **On the version numbering.** Two revisions were drafted in parallel and meet here. One reframed the product around a single check-in with coordinated perspectives (§1, §3, §4.3, §4.4, §10, §13, §14) and called itself v0.5. The other amended the privacy topology twice as the implementation moved storage and then the application itself off the Mac mini (§4.8, §11.3), calling those v0.5 and v0.6. Both sets of changes are real and neither supersedes the other; they touch disjoint sections. The amendment labels inside §4.8 are kept as authored, because they name the decision each one records. v0.7 is where the two lines converge.
+> **On the version numbering.** Two revisions were drafted in parallel and meet here. One reframed the product around a single check-in with coordinated perspectives (§1, §3, §4.3, §4.4, §10, §13, §14) and called itself v0.5. The other amended the privacy topology twice as the implementation moved storage and then the application itself off the Mac mini (§4.8, §11.3), calling those v0.5 and v0.6. Both sets of changes are real and neither supersedes the other; they touch disjoint sections. The amendment labels inside §4.8 are kept as authored, because they name the decision each one records. v0.7 is where the two lines converge; v0.8 is a further amendment on top of it, separating what protects the record from what merely hides the interface.
 
 **Working domain:** `ashwini.health`
 **Audience:** One person—the owner of the data and the decision-maker
@@ -125,6 +125,16 @@ Self-hosting the same stack on the Mac mini restores sole custody without changi
 - What is accepted is a larger attack surface and a second processor. Both are disclosed in [`docs/PRIVACY.md`](PRIVACY.md).
 
 This is a genuine loosening of §11.3 as originally written, made deliberately in exchange for availability and reminder reliability. It is not a reinterpretation of the original intent.
+
+**Amendment — the record is gated, not the interface.** The amendment above was implemented as a blanket refusal: on a public host without configured authentication, every request was refused, pages included. That was one rule too coarse. It made the deployed interface impossible to look at before a database existed, which is not a privacy property — it is a deployment that cannot be inspected.
+
+§11.3 now separates the two:
+
+- **The record.** Every path to personal data is refused whenever real authentication is missing. This holds unconditionally, so it never depends on a check that could be wrong — a missed detection cannot open it.
+- **The interface.** Where no canonical store is configured, the empty shell may be served. There is nothing behind it, and it must say so rather than imply a connected record.
+- The moment a canonical store is configured, the interface is refused again too. Not because the prerendered pages became dangerous, but because a later server-rendered one could read that store, and this is where that is caught.
+
+Nothing about the protected case changed: a publicly hosted deployment holding a record, without a verified session on the allowlist, still serves nothing at all.
 
 ### 4.9 Knowledge is an asset, not an inference
 
@@ -333,7 +343,7 @@ Graph browsing and rich historical exploration belong in rendered private notes/
 
 1. Ashwini may infer and recommend within low-risk, reversible lifestyle and performance domains; it does not diagnose or prescribe.
 2. Photos remain private except for the minimum specific paired images required for an explicitly authorized analysis.
-3. Access is gated by verified identity, not by network position (amended; see §4.8). Every request must carry a verified session belonging to an address on an explicit allowlist. The application must refuse to run on any publicly reachable host where that verification is not configured, with no override. Canonical storage is a named managed processor under §4.8, reached only by the application over an authenticated connection. A private-network deployment remains fully supported; where one is used, the private path is an additional layer and never a substitute for the identity check.
+3. Access to the record is gated by verified identity, not by network position (amended; see §4.8). Every request that could reach personal data must carry a verified session belonging to an address on an explicit allowlist. On a publicly reachable host where that verification is not configured, the application must refuse every such request, with no override — and it must do so unconditionally, never on a check it could get wrong. Where no canonical store is configured at all, it may serve the empty interface: there is no record behind it, and the interface must say so rather than imply a connected one. Canonical storage is a named managed processor under §4.8, reached only by the application over an authenticated connection. A private-network deployment remains fully supported; where one is used, the private path is an additional layer and never a substitute for the identity check.
 4. Moles, lesions, and pigmented spots are never analyzed.
 5. No verdict is issued for a blocked/confounded window.
 6. Prescription medication is never an experimental variable.
