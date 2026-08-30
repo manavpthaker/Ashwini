@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import { Instrument_Sans, Newsreader } from "next/font/google";
-import { ProductProvider } from "@/components/product/product-provider";
-import { ProductShell } from "@/components/product/product-shell";
 import "./globals.css";
 
 const instrumentSans = Instrument_Sans({
@@ -21,7 +19,7 @@ export const metadata: Metadata = {
     default: "Today · Ashwini",
     template: "%s · Ashwini",
   },
-  description: "A bounded, check-in-led personal health advisor prototype.",
+  description: "A private, check-in-led health record for bounded lifestyle guidance.",
 };
 
 const contentSecurityPolicy = [
@@ -44,11 +42,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <head>
         <meta httpEquiv="Content-Security-Policy" content={contentSecurityPolicy} />
       </head>
-      <body>
-        <ProductProvider>
-          <ProductShell>{children}</ProductShell>
-        </ProductProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

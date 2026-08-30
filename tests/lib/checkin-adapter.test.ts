@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { toCheckinResponse, type ConversationTurn, type WireDecision } from "@/lib/checkin-adapter";
 import { EVIDENCE_STATUSES } from "@/domain/evidence";
 import { DOMAINS } from "@/domain/domains";
+import { SENSITIVE_REDACTION } from "@/domain/advisor/sensitive-content";
 
 /**
  * The adapter is where the safety layer's answer becomes something a screen
@@ -24,6 +25,8 @@ const decision = (over: Partial<WireDecision> = {}): WireDecision => ({
 });
 
 const turn = (over: Partial<ConversationTurn> = {}): ConversationTurn => ({
+  text: "I ate lunch",
+  timeZone: "America/New_York",
   reply: { text: "Recorded.", kind: "record", receipt: "Context retained" },
   decisions: [decision()],
   records: [],
@@ -122,6 +125,18 @@ describe("effects are established, never guessed", () => {
     ).toBe("needs-detail");
   });
 
+  test("a stored question preserves an incomplete meal after reload", () => {
+    expect(
+      toCheckinResponse(
+        turn({
+          reply: { text: "What was in it?", kind: "question", receipt: "Meal recorded" },
+          records: ["meal"],
+          followUp: null,
+        }),
+      ).effects.mealStatus,
+    ).toBe("needs-detail");
+  });
+
   test("a caveated training gate favours reduced volume rather than full", () => {
     const response = toCheckinResponse(
       turn({ decisions: [decision({ gateOutcome: "caveated" })] }),
@@ -184,8 +199,27 @@ describe("what the user is shown", () => {
   });
 
   test("a therapy mention is shown as recorded without its content", () => {
-    const recorded = toCheckinResponse(turn({ records: ["therapy_mention"] })).recorded;
-    expect(recorded.some((item) => item.includes("content was not stored"))).toBe(true);
+    const recorded = toCheckinResponse(
+      turn({
+        text: SENSITIVE_REDACTION["therapy-content"],
+        records: ["therapy_mention"],
+      }),
+    ).recorded;
+    expect(recorded.some((item) => item.includes("discarded before persistence"))).toBe(true);
+    expect(recorded).not.toContain("Your wording, retained verbatim");
+  });
+
+  test("mixed therapy and urgent wording keeps the discard receipt after emergency routing", () => {
+    const recorded = toCheckinResponse(
+      turn({
+        text: SENSITIVE_REDACTION["therapy-content"],
+        route: "emergency",
+        records: ["symptom"],
+      }),
+    ).recorded;
+
+    expect(recorded[0]).toContain("content discarded before persistence");
+    expect(recorded).not.toContain("Your wording, retained verbatim");
   });
 
   test("every domain produces a labelled perspective marked as synthesis", () => {

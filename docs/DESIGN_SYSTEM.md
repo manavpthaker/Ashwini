@@ -1,7 +1,7 @@
 # Ashwini Design System
 
-**Version:** 0.5
-**Status:** Implemented for the synthetic Today / Check-in / Plan prototype
+**Version:** 0.6
+**Status:** Implemented for the authenticated, record-backed Today / Check-in / Plan product
 
 ## Product expression
 
@@ -45,7 +45,7 @@ Both are loaded through `next/font` and self-hosted in the production build. Bod
 | `--color-coral` | `#f26f55` | Primary action and nutrition path |
 | `--color-indigo` | `#4658d8` | Recovery path and keyboard focus |
 | `--color-moss` | `#27735e` | Training path and bounded-guidance state |
-| `--color-gold` | `#d9a72e` | Caution and synthetic-preview state |
+| `--color-gold` | `#d9a72e` | Caution and pending state |
 | `--color-route` | `#a63e46` | Route-out and blocked state |
 
 Coral is an action color, not default body text. Status colors always include a text label; meaning never depends on color alone.
@@ -60,9 +60,9 @@ Coral is an action color, not default body text. Status colors always include a 
 
 ## Signature component: consultation path
 
-The converging three-line path is Ashwini’s distinctive explanatory motif. Nutrition, recovery, and training enter as separate evidence-colored paths, converge into one current recommendation, and continue to the next check-in. It communicates multidisciplinary reasoning without inventing a cast of providers.
+The evidence path is Ashwini’s distinctive explanatory motif. Only persisted decision domains may enter it; one domain is one path, and multiple relevant domains may converge into one current recommendation. It communicates inspectable reasoning without inventing a cast of providers.
 
-Use it only when two or more perspectives materially affect one decision. Do not decorate unrelated cards with it.
+Use it only when a saved decision has a reasoning perspective. An empty record gets an explicit no-inference state, not decorative evidence paths.
 
 ## Components
 
@@ -85,22 +85,19 @@ A perspective card contains a reasoning domain, participation state, concise con
 
 ### Check-in response
 
-Responses use four stable sections: Acknowledged, Careful read, Next step, and—only when necessary—One follow-up. A details disclosure preserves what was recorded, status, gate, and receipt. Corrections link to the original, mark it superseded, and state when a prior effect was withdrawn; undo removes only the latest synthetic event.
+Responses use three stable sections: Acknowledged, Careful read, and Next step. A details disclosure preserves what was recorded, status, gate, and receipt. Corrections link to the original and visibly supersede it without deletion. A later check-in is evaluated as a new input; the current release does not imply a threaded provider conversation.
 
 ### Decision choice
 
-Plan choices use native buttons with `aria-pressed`. A blocked gate or open high-priority handoff exposes Pause as the forced protective state and disables every plan choice; it never attributes that state to the user. Outside a gate, Ashwini records a changed user selection but does not restate it as clinical clearance. Activating the already-effective rule selection is idempotent and does not displace a higher-priority open input on Today.
+Plan renders the exact choices stored with the unresolved decision. Each native button is a write action, not a local toggle: activation appends one `decision_responses` row, removes the answered decision from the open list, and shows the server-backed receipt. A blocked route-out with no offered choices exposes no invented dismissal or training control.
 
 ## State integrity
 
-- Safety blocks are absorbing while their source records remain active. Later routine or clear-demo inputs cannot overwrite them or replace the primary Check-in response.
-- Unexpected-dose and possible-side-effect fixtures create a separate high-priority attention state. That handoff remains primary on Today until its source record is corrected or undone.
-- Valid lower-priority fixture effects may be retained behind a protected response. If the controlling handoff is later corrected, its deferred effect must surface with the original receipt and reasoning perspectives—not with stale handoff provenance.
-- Nonurgent prescription and supplement questions retain their own route-out response without replacing an unrelated current-day decision.
-- Corrections preserve the source record, supersede its derived effect, and produce a receipt that matches the recalculated state.
-- The preview uses a deterministic synthetic clock. Only the explicitly labeled pre-session simulation advances Friday from 12:18 PM to 3:45 PM.
-- Correcting a pre-session record may change its derived effect, but it never rewinds the visible scenario clock.
-- User plan choices survive unrelated record-only check-ins and their undo. Gate changes invalidate a prior Full or Reduced choice, but an explicit voluntary Pause remains stored through a protective handoff and reappears after that handoff is corrected or undone; Ashwini never silently resumes loaded training.
+- Today prioritizes unresolved emergency or crisis route-outs, then other route-outs, then blocked decisions, then the newest actionable recommendation.
+- A corrected check-in remains in history, but its prior decision is excluded from the open-decision surface.
+- Responded and expired decisions are not actionable. A response is durable; browser state is never the source of a plan choice.
+- Current-day timelines use the configured time zone and only stored rows. A database failure renders unavailable, never an inferred empty or clear day.
+- Missing meals, sleep, doses, commitments, training sessions, routines, and reviews remain unknown. The interface does not seed a default day.
 
 ## Responsive behavior
 
@@ -129,20 +126,20 @@ Mobile rules:
 
 Use “Check-in,” “perspective,” “coordinated recommendation,” and “human specialist.” Avoid “conversation,” “care team,” “your doctor says,” “provider replied,” “consensus,” or any claim that separate agents independently reviewed the input.
 
-A check-in may yield a record, one follow-up, a recommendation, a blocked verdict, or a route-out. It does not owe the user advice every time.
+A check-in may yield a record, a recommendation, a blocked verdict, or a route-out. It does not owe the user advice every time.
 
 Always distinguish:
 
 - user-reported from verified;
-- a declared synthetic fixture from a fresh analysis;
+- a saved record from an unavailable or unknown input;
 - a rule from a personal pattern;
 - a pattern from causality;
 - Ashwini synthesis from human professional judgment;
-- session-only preview state from saved personal data.
+- an interface empty state from saved personal data.
 
 ## Global commercial readiness
 
-This design direction targets commercial product quality, but the synthetic prototype is not globally release-ready. A real release must:
+This design direction targets commercial product quality, but the current single-subject record-backed app is not globally release-ready. A real release must:
 
 - format dates, times, numbers, units, and week boundaries from the user’s locale and preferences rather than hard-code US conventions;
 - support translation expansion without truncating controls or placing essential copy inside images;
@@ -161,7 +158,7 @@ These are release gates, not reasons to make the current interface look like an 
 - Check-in: `components/product/checkin-screen.tsx`
 - Plan: `components/product/plan-screen.tsx`
 - Typed product contract: `lib/product-model.ts`
-- Declared fixtures: `lib/product-data.ts`
-- Deterministic preview behavior: `lib/synthetic-scenario.ts`
+- Record client contracts: `lib/record-client.ts`
+- Historical prototype-only behavior: `lib/synthetic-scenario.ts`
 
 New components must reuse semantic tokens before adding local values. If a local value recurs across two surfaces, promote it to a token or shared primitive.

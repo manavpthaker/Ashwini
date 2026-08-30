@@ -35,6 +35,7 @@ export interface MessagesTable {
   advisor_version: Immutable<string | null>;
   rule_id: Immutable<string | null>;
   idempotency_key: Immutable<string | null>;
+  input_fingerprint: Immutable<string | null>;
   captured_at: Immutable<Date | null>;
 }
 
@@ -190,6 +191,64 @@ export interface DosesTable {
   note: string | null;
 }
 
+export interface TrainingSessionsTable {
+  session_id: Generated<string>;
+  ts: ColumnType<Date, Date | string, Date | string>;
+  planned: boolean;
+  completed: boolean;
+  kind: string | null;
+  volume_note: string | null;
+  perceived_effort: number | null;
+  notes: string | null;
+  commitment_id: string | null;
+}
+
+export type RoutineStatus = "candidate" | "active" | "paused" | "concluded" | "retired";
+
+export interface RoutinesTable {
+  routine_id: Generated<string>;
+  name: string;
+  domain: Domain;
+  status: RoutineStatus;
+  behavior: string;
+  target: string;
+  expected_lag: string;
+  review_at: Date | null;
+  confound_ids: string[];
+  stop_boundary: string | null;
+  comparator: string | null;
+  interpretation_threshold: string | null;
+  min_comparable_n: number;
+  eligible_when: string | null;
+  started_on: string | null;
+  concluded_on: string | null;
+  is_medication_variable: false;
+}
+
+export interface RoutineOccurrencesTable {
+  occurrence_id: Generated<string>;
+  routine_id: string;
+  ts: Date;
+  performed: boolean;
+  comparable: boolean;
+  exclusion_reason: string | null;
+  gate_outcome: GateOutcome | null;
+  linked_record: unknown;
+}
+
+export interface RoutineReviewsTable {
+  review_id: Generated<string>;
+  routine_id: string;
+  reviewed_ts: Timestamp;
+  evidence_status: EvidenceStatus;
+  n_with: number;
+  n_without: number;
+  n_excluded: number;
+  summary: string;
+  refused: string;
+  decision_id: string | null;
+}
+
 export interface ReminderDispatchesTable {
   dispatch_id: Generated<string>;
   dose_id: Immutable<string>;
@@ -244,6 +303,10 @@ export interface Database {
   "ashwini.confound_evaluations": ConfoundEvaluationsTable;
   "ashwini.external_results": ExternalResultsTable;
   "ashwini.commitments": CommitmentsTable;
+  "ashwini.training_sessions": TrainingSessionsTable;
+  "ashwini.routines": RoutinesTable;
+  "ashwini.routine_occurrences": RoutineOccurrencesTable;
+  "ashwini.routine_reviews": RoutineReviewsTable;
   "ashwini.medications": MedicationsTable;
   "ashwini.interventions": InterventionsTable;
   "ashwini.doses": DosesTable;

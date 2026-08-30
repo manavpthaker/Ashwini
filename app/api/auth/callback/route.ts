@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { isAllowedEmail, readAuthConfig } from "@/lib/auth/config";
+import { safeNextPath } from "@/lib/auth/safe-next";
 
 /**
  * Where the magic link lands. Exchanges the code for a session and sets cookies.
@@ -16,8 +17,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next");
-  const target = next?.startsWith("/") ? next : "/";
+  const target = safeNextPath(url.searchParams.get("next")) ?? "/";
 
   const config = readAuthConfig();
   if (config.mode !== "supabase") {

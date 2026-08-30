@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { isAllowedEmail, readAuthConfig } from "@/lib/auth/config";
+import { safeNextPath } from "@/lib/auth/safe-next";
 
 /**
  * Send a magic link.
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
 
 const schema = z.object({
   email: z.string().email(),
-  next: z.string().startsWith("/").max(200).optional(),
+  next: z.string().max(200).optional(),
 });
 
 const ACCEPTED = {
@@ -75,7 +76,8 @@ export async function POST(request: Request): Promise<Response> {
 
   const origin = new URL(request.url).origin;
   const callback = new URL("/api/auth/callback", origin);
-  if (parsed.data.next) callback.searchParams.set("next", parsed.data.next);
+  const next = safeNextPath(parsed.data.next);
+  if (next) callback.searchParams.set("next", next);
 
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data.email,

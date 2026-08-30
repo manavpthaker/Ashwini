@@ -48,13 +48,22 @@ export function readAuthConfig(source: EnvSource = process.env): AuthConfig {
   const supabasePublishableKey = configuredSupabaseKey?.startsWith("sb_secret_")
     ? null
     : configuredSupabaseKey;
-  const allowedEmails = (source.ASHWINI_ALLOWED_EMAILS ?? "")
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
+  const allowedEmails = [
+    ...new Set(
+      (source.ASHWINI_ALLOWED_EMAILS ?? "")
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
   const tailscaleUser = source.ASHWINI_TAILSCALE_USER?.trim() || null;
 
-  const supabaseReady = Boolean(supabaseUrl && supabasePublishableKey && allowedEmails.length > 0);
+  // The current database is a single-subject record and has no tenant key.
+  // Allowing two identities would give both the same health rows, so multi-user
+  // configuration must fail closed until row ownership exists in the schema.
+  const supabaseReady = Boolean(
+    supabaseUrl && supabasePublishableKey && allowedEmails.length === 1,
+  );
 
   return {
     mode: supabaseReady ? "supabase" : tailscaleUser ? "tailscale" : "none",

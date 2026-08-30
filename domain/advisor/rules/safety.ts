@@ -12,17 +12,64 @@
  */
 
 import type { Rule, RuleOutcome } from "../rule";
-import { mentionedMedications } from "../rule";
+import { attributedHealthClauses, isOwnerHealthClause, mentionedMedications } from "../rule";
+import { classifySensitiveContent } from "../sensitive-content";
 import { formatList } from "../../text";
 
-const CRISIS =
-  /\b(suicid\w*|kill myself|killing myself|end my life|ending my life|want to die|wanna die|don'?t want to (be here|live)|self.?harm|harm myself|hurt myself|cut myself|overdose on purpose|take all my pills)\b/;
-
 const URGENT =
-  /\b(chest (pain|pressure|tightness)|crushing (pain|pressure)|can'?t breathe|cannot breathe|can'?t catch my breath|struggling to breathe|trouble breathing|difficulty breathing|throat (is )?closing|tongue (is )?swelling|anaphyla\w*|face (is )?droop\w*|drooping face|slurr\w*|one.?sided weakness|weakness on one side|numb(ness)? (in|on|down) (my )?(left|right) (arm|side|leg)|worst headache|sudden severe headache|thunderclap|passed out|blacked out|fainted|seizure|convuls\w*|coughing (up )?blood|vomiting blood|blood in my (stool|vomit|urine)|bleeding (heavily|won'?t stop)|sudden vision loss|lost my vision|stiff neck and fever)\b/;
+  /\b(chest (pain|pressure|tightness)|my chest hurts?|crushing (pain|pressure)|shortness of breath|can'?t breathe|cannot breathe|can'?t catch my breath|cannot get enough air|can'?t get enough air|struggling to breathe|trouble breathing|difficulty breathing|(?:i feel like i am|i feel like i'm|i am|i'm) choking|(?:having|i am having|i'm having) (?:a )?(?:heart attack|stroke)|throat (is )?closing|tongue (is )?swelling|anaphyla\w*|face (is )?droop\w*|drooping face|slurr\w*|one.?sided weakness|weakness on one side|numb(ness)? (in|on|down) (my )?(left|right) (arm|side|leg)|worst headache|sudden severe headache|thunderclap|passed out|blacked out|fainted|seizure|convuls\w*|coughing (up )?blood|vomiting blood|blood in my (stool|vomit|urine)|bleeding (heavily|won'?t stop)|sudden vision loss|lost my vision|(?:took|swallowed|ingested) (?:a (?:whole )?bottle|a handful|\d{2,}) (?:of )?(?:pills|tablets|capsules|meds|medication|tylenol|acetaminophen|paracetamol|ibuprofen|advil|motrin))\b/;
+
+const OVERDOSE =
+  /\boverdosed?(?: on\b[^.?!]{0,40})?\b|\b(?:took|taken|swallowed|ingested)\b[^.?!]{0,35}\b(?:(?:all|too many|too much|a lot|a handful|a bunch)(?: of)? (?:my )?|(?:a|the) (?:whole )?bottle(?: of )?|(?:\d{2,}|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)(?: of )?(?:my )?)\s*(?:pills|tablets|capsules|meds|medication|tylenol|acetaminophen|paracetamol|ibuprofen|advil|motrin)\b|\b(?:took|taken)\b[^.?!]{0,35}\b(?:more (?:pills|tablets|capsules|meds|medication) than (?:i|we) should(?: have)?|an? (?:accidental )?(?:double|extra) dose|(?:my )?(?:pills|tablets|capsules|meds|medication) twice)\b/;
+
+const STIFF_NECK = /\b(stiff neck|neck (?:is|feels?) stiff)\b/;
+const FEVER = /\bfever(?:ish)?\b/;
+const URGENT_NEGATED =
+  /\b(?:do not|don't|did not|didn't|does not|doesn't|have not|haven't|am not|i'm not|no longer|never)\s+(?:currently )?(?:have|having|feel|feeling|experience|experiencing|had)?\s*(?:any |a )?(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|heart attack|stroke|seizure|fainting|fever|stiff neck)\b|\b(?:have not|haven't) (?:passed out|fainted)\b|\b(?:no|deny|denies|denied) (?:any )?(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|heart attack|stroke|seizure|fever|stiff neck)\b|\b(?:i )?(?:have |had )?never had (?:a )?(?:seizure|fainting episode)\b|\b(?:did not|didn't|have not|haven't) (?:overdose|overdosed|take|swallow|swallowed|ingest|ingested)\b|\bi(?:'m| am) not (?:going|planning|about) to overdose\b|\bi (?:do not|don't) plan to overdose\b/;
+const URGENT_HYPOTHETICAL =
+  /\b(?:if|what if|in case)\b[^.?!]{0,80}\b(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|seizure|faint|fever|stiff neck|overdose)\b/;
+const URGENT_HISTORICAL =
+  /\b(?:used to have|previously had)\b[^.?!]{0,50}\b(?:chest pain|chest pressure|shortness of breath|trouble breathing|difficulty breathing|seizure|fever|stiff neck)\b|\b(?:had (?:chest pain|chest pressure|a seizure|fever|a stiff neck)|fainted|passed out)\b[^.?!]{0,45}\b(?:yesterday|last (?:week|month|year)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) (?:days?|weeks?|months?|years?) ago|as a child)\b/;
+
+function isCurrentPersonalUrgentText(text: string): boolean {
+  const hasFeverWithStiffNeck = STIFF_NECK.test(text) && FEVER.test(text);
+  if (
+    hasFeverWithStiffNeck &&
+    !URGENT_NEGATED.test(text) &&
+    !URGENT_HYPOTHETICAL.test(text) &&
+    !URGENT_HISTORICAL.test(text) &&
+    attributedHealthClauses(text).some(
+      (clause) => STIFF_NECK.test(clause.text) || FEVER.test(clause.text),
+    )
+  ) {
+    return true;
+  }
+
+  return attributedHealthClauses(text).some((clause) => {
+    const hasUrgentSignal =
+      URGENT.test(clause.text) ||
+      OVERDOSE.test(clause.text) ||
+      (STIFF_NECK.test(clause.text) && FEVER.test(clause.text));
+    if (
+      !hasUrgentSignal ||
+      URGENT_NEGATED.test(clause.text) ||
+      URGENT_HYPOTHETICAL.test(clause.text) ||
+      URGENT_HISTORICAL.test(clause.text)
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
 
 const PREGNANCY =
   /\b(pregnan\w*|conceiv\w*|ttc|trying for a baby|breastfeed\w*|nursing|postpartum|post.?partum)\b/;
+const PREGNANCY_NEGATED =
+  /\b(?:(?:i am|i'm|we are|we're) (?:not|no longer)|not|never|no longer) (?:currently )?(?:pregnant|breastfeeding|nursing|postpartum)\b/;
+const PREGNANCY_HYPOTHETICAL =
+  /\b(?:if|what if|in case)\b[^.?!]{0,80}\b(?:pregnan\w*|conceiv\w*|breastfeed\w*|postpartum)\b/;
+const PREGNANCY_HISTORICAL =
+  /\b(?:was|were|used to be)\b[^.?!]{0,30}\b(?:pregnan\w*|breastfeed\w*|nursing|postpartum)\b[^.?!]{0,30}\b(?:last (?:year|month)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) (?:months?|years?) ago|previously|in the past)\b/;
 
 /**
  * PRD 11.4: "Moles, lesions, and pigmented spots are never analyzed."
@@ -31,6 +78,12 @@ const PREGNANCY =
  */
 const SKIN =
   /\b(mole|moles|lesion|lesions|freckle\w*|pigment\w*|birthmark|skin tag|melanoma|rash|hives|discolou?r\w*|(dark|new|odd|weird|changing|strange) (spot|mark|patch)|spot on my (skin|back|arm|leg|face|chest|shoulder|neck))\b/;
+const SKIN_NEGATED =
+  /\b(?:do not|don't|did not|didn't|have not|haven't|no longer|never)\b[^.?!]{0,40}\b(?:mole|lesion|rash|hives|spot|mark|patch|skin tag)\b/;
+const SKIN_HYPOTHETICAL =
+  /\b(?:if|what if|in case) (?:i|we) (?:ever )?(?:get|develop|have|had|notice)\b[^.?!]{0,60}\b(?:mole|lesion|rash|hives|spot|mark|patch|skin tag)\b/;
+const SKIN_HISTORICAL =
+  /\b(?:used to have|previously had)\b[^.?!]{0,50}\b(?:mole|lesion|rash|hives|spot|mark|patch|skin tag)\b|\b(?:had|noticed)\b[^.?!]{0,50}\b(?:mole|lesion|rash|hives|spot|mark|patch|skin tag)\b[^.?!]{0,35}\b(?:last (?:week|month|year)|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten) (?:days?|weeks?|months?|years?) ago|in the past)\b/;
 
 /** Explicit "do these combine" language. */
 const COMBINE =
@@ -67,9 +120,8 @@ const ASKING =
 
 const PRESCRIPTION_CHANGE =
   /\b((increase|increasing|decrease|decreasing|raise|raising|lower|lowering|double|doubling|halve|halving|split|stop|stopping|skip|skipping|quit|change|changing|adjust|adjusting|switch|switching|taper|tapering|wean|weaning|come off|get off)\b[^.?!]{0,40}\b(dose|dosage|medication|meds|prescription|pill|tablet|mg)|\b(dose|dosage|medication|meds|prescription)\b[^.?!]{0,40}\b(increase|decrease|higher|lower|double|stop|skip|change|adjust|switch|taper))\b/;
-
-const THERAPY =
-  /\b(therapy|therapist|counsell?or|counselling|counseling|psychotherap\w*|my session with)\b/;
+const PRESCRIPTION_CHANGE_NEGATED =
+  /\b(?:do not|don't|did not|didn't|have not|haven't|am not|i'm not|never)\b[^.?!]{0,50}\b(?:increase|decrease|raise|lower|double|halve|split|stop|skip|change|adjust|switch|taper|wean)\w*\b/;
 
 function reply(text: string, receipt: string): RuleOutcome["reply"] {
   return { text, kind: "route", receipt };
@@ -77,7 +129,7 @@ function reply(text: string, receipt: string): RuleOutcome["reply"] {
 
 export const crisisRule: Rule = {
   id: "crisis",
-  matches: ({ text }) => CRISIS.test(text),
+  matches: ({ text }) => classifySensitiveContent(text) === "crisis",
   apply: () => ({
     domain: "system",
     evidenceStatus: "route_out",
@@ -85,7 +137,7 @@ export const crisisRule: Rule = {
     decisionType: "route_out",
     route: "crisis_line",
     reply: reply(
-      "I'm not the right support for this, and I don't want to leave you with a health app when you need a person. Please contact a crisis line now — in the US and Canada you can call or text 988; the UK is 111, and 112 works across the EU. If you are in immediate danger, call emergency services. I've kept nothing about this beyond the fact that you reached out.",
+      "I'm not the right support for this, and a health app should not be the only support here. If this is about you or someone else, contact a crisis service now — in the US or Canada, call or text 988; elsewhere, use the relevant country's official crisis service. If anyone may act on this now or cannot stay safe, call the local emergency number or go to the nearest emergency department now. I retained no wording—only the fact and time that this crisis route was shown.",
       "Crisis route · no interpretation, no analysis",
     ),
     records: [{ kind: "context_note", text: "Crisis route-out issued." }],
@@ -102,21 +154,18 @@ export const crisisRule: Rule = {
 
 export const urgentSymptomRule: Rule = {
   id: "urgent-symptoms",
-  matches: ({ text }) => URGENT.test(text),
-  apply: ({ input }) => ({
+  matches: ({ text }) => isCurrentPersonalUrgentText(text),
+  apply: () => ({
     domain: "system",
     evidenceStatus: "route_out",
     ladderLevel: 5,
     decisionType: "route_out",
     route: "emergency",
     reply: reply(
-      "This is not a wait-and-see item. Stop what you're doing and seek urgent medical help now — emergency services, or urgent care if you can get there faster. I've kept your exact wording and the time so you can show what you reported rather than reconstructing it.",
-      "Urgent route · original wording retained",
+      "This is not a wait-and-see item. If this is about you or someone else, seek emergency medical help now—call emergency services or go to an emergency department. I've recorded that the emergency route was shown and when; I have not converted this wording into a clinical finding.",
+      "Urgent route shown · time recorded, no clinical finding",
     ),
-    records: [
-      { kind: "symptom", text: input.utterance.text, bodyRegion: null },
-      { kind: "context_note", text: "Urgent route-out issued." },
-    ],
+    records: [{ kind: "context_note", text: "Urgent route-out issued." }],
     followUp: null,
     confidenceNote:
       "Routed on reported symptoms alone. Ashwini has not assessed severity and cannot rule anything in or out.",
@@ -131,7 +180,15 @@ export const urgentSymptomRule: Rule = {
 
 export const pregnancyRule: Rule = {
   id: "pregnancy",
-  matches: ({ text }) => PREGNANCY.test(text),
+  matches: ({ text }) =>
+    attributedHealthClauses(text).some(
+      (clause) =>
+        PREGNANCY.test(clause.text) &&
+        !PREGNANCY_NEGATED.test(clause.text) &&
+        !PREGNANCY_HYPOTHETICAL.test(clause.text) &&
+        !PREGNANCY_HISTORICAL.test(clause.text) &&
+        isOwnerHealthClause(clause),
+    ),
   apply: ({ input }) => ({
     domain: "system",
     evidenceStatus: "route_out",
@@ -139,8 +196,8 @@ export const pregnancyRule: Rule = {
     decisionType: "route_out",
     route: "clinician",
     reply: reply(
-      "I've recorded this, but it changes the risk profile for nutrition, supplements, and training all at once, and those calls need a clinician who can evaluate you. I'll keep the record and prepare a handoff; I won't be adjusting your plan off my own reasoning while this is open.",
-      "Protected record · clinician handoff prepared",
+      "I've recorded the route and time, but this changes the risk profile for nutrition, supplements, and training all at once, and those calls need a clinician who can evaluate you. Handoff preparation is not connected yet, so contact that clinician directly and describe what changed; I won't adjust your plan from my own reasoning while this is open.",
+      "Protected record · clinician route recorded",
     ),
     records: [{ kind: "context_note", text: input.utterance.text }],
     followUp: null,
@@ -157,7 +214,15 @@ export const pregnancyRule: Rule = {
 
 export const skinLesionRule: Rule = {
   id: "skin-lesion",
-  matches: ({ text }) => SKIN.test(text),
+  matches: ({ text }) =>
+    attributedHealthClauses(text).some(
+      (clause) =>
+        SKIN.test(clause.text) &&
+        !SKIN_NEGATED.test(clause.text) &&
+        !SKIN_HYPOTHETICAL.test(clause.text) &&
+        !SKIN_HISTORICAL.test(clause.text) &&
+        isOwnerHealthClause(clause),
+    ),
   apply: ({ input }) => ({
     domain: "body",
     evidenceStatus: "route_out",
@@ -167,15 +232,15 @@ export const skinLesionRule: Rule = {
     // Deliberately says nothing about what it might be, how it looks, or whether
     // it is concerning. PRD 11.4 excludes this from analysis entirely.
     reply: reply(
-      "I don't analyse skin marks, and I'm not going to guess at this one — that belongs with a dermatologist. What I can do is document it properly: a dated photo in consistent light, with something for scale, so they see change over time rather than one snapshot. Want me to set up that capture and prepare the handoff?",
-      "Documented for dermatology · not analysed",
+      "I don't analyse skin marks, and I'm not going to guess at this one — that belongs with a dermatologist. I recorded the route and time. Photo capture and handoff preparation are not connected yet; arrange the review directly, describe what changed, and use your device if you want a dated photo for that clinician.",
+      "Dermatology route recorded · not analysed",
     ),
     records: [{ kind: "dermatology_handoff", userWording: input.utterance.text }],
-    followUp: "Should I start a dated capture series for this so the change is visible later?",
+    followUp: null,
     confidenceNote:
       "No assessment was made. PRD 11.4 excludes moles, lesions, and pigmented spots from analysis.",
     refused: "Ashwini will not describe, assess, or estimate the significance of any skin mark.",
-    choices: ["Start a capture series", "Just record it", "Do nothing for now"],
+    choices: [],
     target: null,
     expectedLag: null,
     gated: false,
@@ -184,20 +249,22 @@ export const skinLesionRule: Rule = {
 
 export const drugDrugRule: Rule = {
   id: "drug-drug",
-  matches: (context) => {
-    const named = mentionedMedications(context);
-    // Two of the user's own medications in one sentence is a combination question
-    // whatever the phrasing.
-    if (named.length >= 2) return true;
+  matches: (context) =>
+    attributedHealthClauses(context.text).some((clause) => {
+      if (!isOwnerHealthClause(clause)) return false;
+      const clauseContext = { ...context, text: clause.text };
+      const named = mentionedMedications(clauseContext);
+      // Two of the user's own medications in one clause is a combination
+      // question whatever the phrasing.
+      if (named.length >= 2) return true;
 
-    // Otherwise something medicinal has to be in play — on file or not — before
-    // an interaction frame means anything. "Can I combine these two sessions?"
-    // is not a pharmacist question.
-    if (named.length === 0 && !MEDICATION_WORD.test(context.text)) return false;
+      // Otherwise something medicinal has to be in play — on file or not —
+      // before an interaction frame means anything.
+      if (named.length === 0 && !MEDICATION_WORD.test(clause.text)) return false;
 
-    if (COMBINE.test(context.text)) return true;
-    return ASKING.test(context.text) && /\bwith\b/.test(context.text);
-  },
+      if (COMBINE.test(clause.text)) return true;
+      return ASKING.test(clause.text) && /\bwith\b/.test(clause.text);
+    }),
   apply: (context) => {
     const named = mentionedMedications(context);
     return {
@@ -207,15 +274,15 @@ export const drugDrugRule: Rule = {
       decisionType: "route_out",
       route: "pharmacist",
       reply: reply(
-        `This is a drug–drug question about ${formatList(named, "your medications")}, and it goes to your pharmacist. My only licensed interaction source is Examine Connect, which covers supplement–drug and supplement–supplement safety and explicitly does not cover drug–drug. A pharmacist can check this against your full list in minutes and it's free. I've recorded the question so you don't have to retype it.`,
-        "Pharmacist handoff · outside Examine coverage",
+        `This is a drug–drug question about ${formatList(named, "your medications")}, and it goes to your pharmacist. My only licensed interaction source is Examine Connect, which covers supplement–drug and supplement–supplement safety and explicitly does not cover drug–drug. I recorded the route and time, but no handoff is sent from this app; contact a pharmacist directly and describe the question.`,
+        "Pharmacist route recorded · outside Examine coverage",
       ),
-      records: [{ kind: "medication_event", text: context.input.utterance.text }],
+      records: [{ kind: "context_note", text: "Pharmacist route-out issued." }],
       followUp: null,
       confidenceNote:
         "No interaction source was consulted. PRD 7.3 forbids inferring safety from silence.",
       refused: "Ashwini will not perform or approximate a drug–drug interaction check.",
-      choices: ["Prepare a pharmacist handoff", "Just record the question"],
+      choices: [],
       target: null,
       expectedLag: null,
       gated: false,
@@ -225,24 +292,30 @@ export const drugDrugRule: Rule = {
 
 export const prescriptionChangeRule: Rule = {
   id: "prescription-change",
-  matches: ({ text }) => PRESCRIPTION_CHANGE.test(text),
-  apply: ({ input }) => ({
+  matches: ({ text }) => {
+    const ownerText = attributedHealthClauses(text)
+      .filter(isOwnerHealthClause)
+      .map((clause) => clause.text)
+      .join(", ");
+    return PRESCRIPTION_CHANGE.test(ownerText) && !PRESCRIPTION_CHANGE_NEGATED.test(ownerText);
+  },
+  apply: () => ({
     domain: "medication",
     evidenceStatus: "route_out",
     ladderLevel: 5,
     decisionType: "route_out",
     route: "prescriber",
     reply: reply(
-      "Dose and timing changes are your prescriber's call, not mine — and a prescription is never something I'll treat as an experiment. What I can do is bring the evidence: I have your adherence record and the timeline, which is usually the part that's hard to reconstruct in an appointment. Want me to prepare that handoff?",
-      "Prescriber handoff · adherence record attached",
+      "Dose and timing changes are your prescriber's call, not mine — and a prescription is never something I'll treat as an experiment. I recorded the route and time, but no adherence summary or handoff is generated here. Contact your prescriber directly, describe the question, and bring your medication list and dose history.",
+      "Prescriber route recorded · no handoff sent",
     ),
-    records: [{ kind: "medication_event", text: input.utterance.text }],
-    followUp: "Should I prepare the adherence summary for your prescriber?",
+    records: [{ kind: "context_note", text: "Prescriber route-out issued." }],
+    followUp: null,
     confidenceNote:
       "PRD 11.6 and 7.3: prescription medication is never an experimental variable and dose changes are prescriber-controlled.",
     refused:
       "Ashwini will not suggest a dose, timing, or treatment change, or evaluate whether a prescription is working.",
-    choices: ["Prepare the handoff", "Just record it"],
+    choices: [],
     target: null,
     expectedLag: null,
     gated: false,
@@ -251,7 +324,12 @@ export const prescriptionChangeRule: Rule = {
 
 export const therapyRule: Rule = {
   id: "therapy-content",
-  matches: ({ text }) => THERAPY.test(text),
+  matches: ({ text }) =>
+    classifySensitiveContent(text) === "therapy-content" &&
+    attributedHealthClauses(text).some(
+      (clause) =>
+        classifySensitiveContent(clause.text) === "therapy-content" && isOwnerHealthClause(clause),
+    ),
   apply: () => ({
     domain: "focus",
     evidenceStatus: "recorded",
@@ -283,5 +361,9 @@ export const safetyRules: readonly Rule[] = [
   skinLesionRule,
   drugDrugRule,
   prescriptionChangeRule,
+  // Privacy classification runs independently before persistence. Keeping this
+  // rule after every clinical/safety route means protected therapy wording is
+  // still discarded without suppressing the route the non-therapy content
+  // requires.
   therapyRule,
 ];

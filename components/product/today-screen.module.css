@@ -61,6 +61,14 @@
   background: var(--color-mist);
 }
 
+.emptyPathCopy {
+  max-width: 540px;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
 .pathCopy {
   display: grid;
   gap: var(--space-2);
@@ -343,6 +351,17 @@
   line-height: 1.55;
 }
 
+.emptyPerspective {
+  margin: var(--space-5) 0 0;
+  padding: var(--space-5);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-4);
+  color: var(--color-muted);
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
 .timelineSection {
   padding: clamp(32px, 4vw, 50px);
   box-shadow: var(--shadow-sm);
@@ -366,9 +385,19 @@
 
 .timeline {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: var(--space-2);
   margin-top: var(--space-6);
+}
+
+.timelineEmpty {
+  margin: var(--space-6) 0 0;
+  padding: var(--space-5);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-4);
+  color: var(--color-muted);
+  background: var(--color-canvas);
+  line-height: 1.6;
 }
 
 .timeline article {

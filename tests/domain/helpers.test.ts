@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { DOMAINS, DOMAIN_LABEL, isDomain } from "@/domain/domains";
-import { containsWord, mentionedMedications, normalize, respondSync } from "@/domain/advisor";
+import {
+  attributedHealthClauses,
+  containsWord,
+  isOwnerHealthClause,
+  mentionedMedications,
+  normalize,
+  respondSync,
+} from "@/domain/advisor";
 import { advisorInput, sertraline } from "./advisor/support";
 
 describe("domains", () => {
@@ -69,6 +76,40 @@ describe("normalize", () => {
 
   it("handles an empty string", () => {
     expect(normalize("   ")).toBe("");
+  });
+});
+
+describe("health-clause subject attribution", () => {
+  it("carries a named third party across a coordinated clause", () => {
+    expect(attributedHealthClauses("My dad has chest pain and cannot breathe")).toEqual([
+      { text: "My dad has chest pain", subject: "third_party" },
+      { text: "cannot breathe", subject: "third_party" },
+    ]);
+  });
+
+  it("lets a concrete first-person assertion take ownership back", () => {
+    const clauses = attributedHealthClauses("My wife is here and I have chest pain");
+    expect(clauses).toEqual([
+      { text: "My wife is here", subject: "third_party" },
+      { text: "I have chest pain", subject: "self" },
+    ]);
+    expect(clauses.map(isOwnerHealthClause)).toEqual([false, true]);
+  });
+
+  it("does not confuse observation or caregiving with the owner's health", () => {
+    for (const text of [
+      "I think my dad has chest pain",
+      "I was there when my wife fainted",
+      "Can I give my dad ibuprofen with lisinopril",
+    ]) {
+      expect(attributedHealthClauses(text)[0]?.subject, text).toBe("third_party");
+    }
+  });
+
+  it("keeps terse owner check-ins usable", () => {
+    const clause = attributedHealthClauses("chest pain")[0];
+    expect(clause).toEqual({ text: "chest pain", subject: "unspecified" });
+    expect(clause && isOwnerHealthClause(clause)).toBe(true);
   });
 });
 
@@ -143,7 +184,7 @@ describe("list formatting in user-facing copy", () => {
   });
 
   it("uses a serial comma for three", () => {
-    const output = respondSync(advisorInput("creatine, magnesium and zinc together?"));
+    const output = respondSync(advisorInput("should i take creatine, magnesium and zinc?"));
     expect(output.reply.text).toMatch(/creatine, magnesium, and zinc/);
   });
 

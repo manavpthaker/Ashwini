@@ -19,7 +19,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "lcov"],
       include: ["domain/**/*.ts", "server/**/*.ts", "lib/**/*.ts"],
-      exclude: ["**/*.test.ts", "lib/product-data.ts", "lib/learning.ts"],
+      exclude: ["**/*.test.ts", "lib/learning.ts"],
       thresholds: {
         // The domain layer is pure and safety-critical, so full coverage is both
         // achievable and meaningful. Everything else is held to a lower bar on

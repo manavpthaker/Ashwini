@@ -37,6 +37,12 @@ const schema = z.object({
    */
   ASHWINI_TIME_ZONE: z.string().min(1).default("UTC"),
 
+  /**
+   * Server-only pepper for exact idempotent replay of redacted wording.
+   * Without it, a plain content hash would be guessable from a DB snapshot.
+   */
+  ASHWINI_INPUT_HMAC_KEY: z.string().min(32).optional(),
+
   /** Server credential for the Examine Connect safety endpoint. Never client-side. */
   EXAMINE_CONNECT_API_KEY: z.string().min(1).optional(),
 
@@ -86,6 +92,12 @@ export function env(): Env {
 
     const auth = readAuthConfig();
 
+    if (auth.supabaseUrl && auth.supabasePublishableKey && auth.allowedEmails.length !== 1) {
+      throw new Error(
+        "ASHWINI_ALLOWED_EMAILS must name exactly one account. This schema is a single-owner record and does not yet isolate rows by user.",
+      );
+    }
+
     if (auth.mode === "none") {
       throw new Error(
         "No authentication is configured. Set Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, ASHWINI_ALLOWED_EMAILS), or ASHWINI_TAILSCALE_USER behind `tailscale serve`.",
@@ -104,6 +116,12 @@ export function env(): Env {
     if (auth.mode === "tailscale" && value.ASHWINI_REQUIRE_IDENTITY === false) {
       throw new Error(
         "ASHWINI_REQUIRE_IDENTITY=0 is refused in production. The identity gate is the only thing standing between the tailnet and the health record.",
+      );
+    }
+
+    if (!value.ASHWINI_INPUT_HMAC_KEY) {
+      throw new Error(
+        "ASHWINI_INPUT_HMAC_KEY is required in production so protected replay fingerprints cannot be guessed from the database.",
       );
     }
   }

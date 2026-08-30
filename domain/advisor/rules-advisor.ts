@@ -21,7 +21,7 @@ import type { Advisor, AdvisorInput, AdvisorOutput, DecisionDraft } from "./type
 export const RULE_PIPELINE: readonly Rule[] = [...safetyRules, ...guidanceRules];
 
 /** Bumped whenever rule behaviour changes; stamped on every decision written. */
-export const RULES_ADVISOR_VERSION = "rules-1.0.0";
+export const RULES_ADVISOR_VERSION = "rules-1.0.1";
 
 /** How long a recommendation stands before it needs revisiting (PRD 9 requires an expiry). */
 const RECOMMENDATION_TTL_MS = 12 * 60 * 60 * 1000;

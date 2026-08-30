@@ -91,7 +91,28 @@ describeIfDb("conversation round trip", () => {
         text: "Correction: never mind",
         correctionOf: "00000000-0000-0000-0000-000000000000",
       }),
-    ).rejects.toThrow(/no longer exists/i);
+    ).rejects.toThrow(/missing or has already been superseded/i);
+  });
+
+  it("does not let a stale correction repoint an already-corrected message", async () => {
+    const original = await handleUtterance({ text: "my shoulder hurts under load" });
+    const first = await handleUtterance({
+      text: "Correction: it was ordinary soreness",
+      correctionOf: original.userMessageId,
+    });
+
+    await expect(
+      handleUtterance({
+        text: "Correction: stale replacement",
+        correctionOf: original.userMessageId,
+      }),
+    ).rejects.toThrow(/missing or has already been superseded/i);
+
+    const source = await client.query<{ corrected_by: string | null }>(
+      "select corrected_by from ashwini.messages where message_id = $1",
+      [original.userMessageId],
+    );
+    expect(source.rows[0]?.corrected_by).toBe(first.userMessageId);
   });
 
   it("permits no mutation of a message other than corrected_by", async () => {
@@ -137,19 +158,121 @@ describeIfDb("conversation round trip", () => {
     expect(rows).toEqual([{ record_kind: "medication_event", record_table: "messages" }]);
   });
 
+  it("discards therapy content before it reaches the message table", async () => {
+    const privateToken = `therapy-private-${crypto.randomUUID()}`;
+    const result = await handleUtterance({
+      text: `My therapy session covered ${privateToken}`,
+    });
+
+    const { rows } = await client.query<{ text: string }>(
+      "select text from ashwini.messages where message_id = $1",
+      [result.userMessageId],
+    );
+    expect(rows[0]?.text).toBe("Therapy session mentioned · content not retained");
+    const leaked = await client.query<{ count: string }>(
+      "select count(*) from ashwini.messages where text like $1",
+      [`%${privateToken}%`],
+    );
+    expect(leaked.rows[0]?.count).toBe("0");
+  });
+
+  it("discards crisis content before it reaches the message table", async () => {
+    const privateToken = `crisis-private-${crypto.randomUUID()}`;
+    const result = await handleUtterance({
+      text: `I want to end my life because ${privateToken}`,
+    });
+
+    const { rows } = await client.query<{ text: string }>(
+      "select text from ashwini.messages where message_id = $1",
+      [result.userMessageId],
+    );
+    expect(rows[0]?.text).toBe("Crisis check-in received · content not retained");
+    const leaked = await client.query<{ count: string }>(
+      "select count(*) from ashwini.messages where text like $1",
+      [`%${privateToken}%`],
+    );
+    expect(leaked.rows[0]?.count).toBe("0");
+  });
+
+  it("routes a mixed therapy and urgent symptom without retaining its wording", async () => {
+    const privateToken = `mixed-private-${crypto.randomUUID()}`;
+    const result = await handleUtterance({
+      text: `I just left therapy and now I have chest pain ${privateToken}`,
+    });
+
+    expect(result.output.trace.ruleId).toBe("urgent-symptoms");
+    expect(result.output.route).toBe("emergency");
+    expect(result.userText).toBe("Therapy session mentioned · content not retained");
+
+    const message = await client.query<{ text: string }>(
+      "select text from ashwini.messages where message_id = $1",
+      [result.userMessageId],
+    );
+    expect(message.rows[0]?.text).toBe("Therapy session mentioned · content not retained");
+    const symptom = await client.query<{ count: string }>(
+      "select count(*)::text as count from ashwini.symptoms where message_id = $1",
+      [result.userMessageId],
+    );
+    expect(symptom.rows[0]?.count).toBe("0");
+    expect(JSON.stringify(message.rows)).not.toContain(privateToken);
+  });
+
   it("treats the same idempotency key as one write", async () => {
     const key = `test-${crypto.randomUUID()}`;
-    const first = await handleUtterance({ text: "I ate lunch", idempotencyKey: key });
-    const second = await handleUtterance({ text: "I ate lunch", idempotencyKey: key });
+    const first = await handleUtterance({ text: "I feel flat today", idempotencyKey: key });
+    const second = await handleUtterance({ text: "I feel flat today", idempotencyKey: key });
 
     expect(first.replayed).toBe(false);
     expect(second.replayed).toBe(true);
-    expect(second.decisionIds).toHaveLength(0);
+    expect(second.advisorMessageId).toBe(first.advisorMessageId);
+    expect(second.decisionIds).toEqual(first.decisionIds);
+    expect(second.output).toEqual(first.output);
 
     const { rows } = await client.query<{ count: string }>(
       "select count(*) from ashwini.messages where idempotency_key = $1",
       [key],
     );
     expect(rows[0]?.count).toBe("1");
+  });
+
+  it("rejects reuse of an idempotency key for different wording", async () => {
+    const key = `test-${crypto.randomUUID()}`;
+    await handleUtterance({ text: "I feel flat today", idempotencyKey: key });
+    await expect(handleUtterance({ text: "I ate lunch", idempotencyKey: key })).rejects.toThrow(
+      /already used for a different check-in/i,
+    );
+  });
+
+  it("binds a protected replay to the exact sensitive input", async () => {
+    const key = `test-${crypto.randomUUID()}`;
+    const first = await handleUtterance({
+      text: "My therapy session was about work",
+      idempotencyKey: key,
+    });
+    const replay = await handleUtterance({
+      text: "My therapy session was about work",
+      idempotencyKey: key,
+    });
+
+    expect(first.replayed).toBe(false);
+    expect(replay.replayed).toBe(true);
+    await expect(
+      handleUtterance({
+        text: "I just left therapy and now I have chest pain",
+        idempotencyKey: key,
+      }),
+    ).rejects.toThrow(/already used for a different check-in/i);
+  });
+
+  it("turns concurrent first writes with one key into one write and one replay", async () => {
+    const key = `test-${crypto.randomUUID()}`;
+    const results = await Promise.all([
+      handleUtterance({ text: "I feel flat today", idempotencyKey: key }),
+      handleUtterance({ text: "I feel flat today", idempotencyKey: key }),
+    ]);
+
+    expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+    expect(results[0]?.userMessageId).toBe(results[1]?.userMessageId);
+    expect(results[0]?.advisorMessageId).toBe(results[1]?.advisorMessageId);
   });
 });

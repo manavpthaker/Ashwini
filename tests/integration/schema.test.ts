@@ -163,6 +163,47 @@ describeIfDb("schema invariants", () => {
           original.rows[0]?.message_id,
         ]),
       ).resolves.toBeDefined();
+
+      const secondReplacement = await client.query<{ message_id: string }>(
+        "insert into ashwini.messages (role, text) values ('user', 'second correction') returning message_id",
+      );
+      await expect(
+        client.query("update ashwini.messages set corrected_by = $1 where message_id = $2", [
+          secondReplacement.rows[0]?.message_id,
+          original.rows[0]?.message_id,
+        ]),
+      ).rejects.toThrow(/already set|repointed/);
+    });
+
+    it("keeps the correction graph one-way and one-to-one", async () => {
+      const original = await client.query<{ message_id: string }>(
+        "insert into ashwini.messages (role, text) values ('user', 'source') returning message_id",
+      );
+      const replacement = await client.query<{ message_id: string }>(
+        "insert into ashwini.messages (role, text) values ('user', 'replacement') returning message_id",
+      );
+      const other = await client.query<{ message_id: string }>(
+        "insert into ashwini.messages (role, text) values ('user', 'other') returning message_id",
+      );
+      const sourceId = original.rows[0]?.message_id;
+      const replacementId = replacement.rows[0]?.message_id;
+
+      await client.query("update ashwini.messages set corrected_by = $1 where message_id = $2", [
+        replacementId,
+        sourceId,
+      ]);
+      await expect(
+        client.query("update ashwini.messages set corrected_by = $1 where message_id = $2", [
+          sourceId,
+          replacementId,
+        ]),
+      ).rejects.toThrow(/already superseded/i);
+      await expect(
+        client.query("update ashwini.messages set corrected_by = $1 where message_id = $2", [
+          replacementId,
+          other.rows[0]?.message_id,
+        ]),
+      ).rejects.toThrow(/unique/i);
     });
 
     it("refuses to rewrite the text of a message", async () => {
@@ -189,6 +230,23 @@ describeIfDb("schema invariants", () => {
       );
       await failsWith("update ashwini.decision_responses set choice = 'x'", /append-only/);
       await failsWith("delete from ashwini.decision_responses", /append-only/);
+    });
+
+    it("permits only one immutable response per decision", async () => {
+      const inserted = await client.query<{ decision_id: string }>(
+        `${decision("recorded", 0, "clear")} returning decision_id`,
+      );
+      const decisionId = inserted.rows[0]?.decision_id;
+      await client.query(
+        "insert into ashwini.decision_responses (decision_id, choice) values ($1, 'first')",
+        [decisionId],
+      );
+      await expect(
+        client.query(
+          "insert into ashwini.decision_responses (decision_id, choice) values ($1, 'second')",
+          [decisionId],
+        ),
+      ).rejects.toThrow(/unique/i);
     });
   });
 

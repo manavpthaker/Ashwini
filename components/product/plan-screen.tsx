@@ -1,183 +1,516 @@
 "use client";
 
 import Link from "next/link";
-import { buttonClassName, Eyebrow, Status } from "@/components/design-system/ui";
-import { ArrowIcon, CheckIcon, ClockIcon, InfoIcon, RuleIcon, ShieldIcon } from "@/components/product/icons";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { DOMAIN_LABEL } from "@/domain/domains";
+import { EVIDENCE_LABEL, EVIDENCE_MEANING, EVIDENCE_STATUSES } from "@/domain/evidence";
+import { buttonClassName, Eyebrow, Status, type StatusTone } from "@/components/design-system/ui";
+import {
+  ArrowIcon,
+  CheckIcon,
+  ClockIcon,
+  InfoIcon,
+  RuleIcon,
+  ShieldIcon,
+} from "@/components/product/icons";
 import { useProduct } from "@/components/product/product-provider";
-import { evidenceDefinitions, routines, weeklyReview } from "@/lib/product-data";
-import type { AttentionState, TrainingChoice } from "@/lib/product-model";
-import { planIsLocked } from "@/lib/synthetic-scenario";
+import {
+  fetchPlanSnapshot,
+  RecordApiError,
+  type OpenDecision,
+  type PlanSnapshot,
+  type RoutineStatus,
+} from "@/lib/record-client";
 import styles from "./plan-screen.module.css";
 
-const trainingChoices: readonly { id: TrainingChoice; label: string; detail: string }[] = [
-  { id: "hold", label: "Hold until 3:45", detail: "Keep the session on the calendar without deciding volume yet." },
-  { id: "full", label: "Full volume", detail: "Choose only after the pre-session check remains clear." },
-  { id: "reduced", label: "Reduced volume", detail: "Use the declared lower-volume version of the existing plan." },
-  { id: "pause", label: "Pause loaded training", detail: "Pause the loaded session by choice; route to a human if the facts require it." },
-] as const;
-
-function choiceHeadline(
-  choice: TrainingChoice,
-  locked: boolean,
-  attention: AttentionState,
-  gate: ReturnType<typeof useProduct>["derivedDay"]["trainingGate"],
-) {
-  if (attention === "urgent-care") return "Routine planning is withheld while urgent human care is the next step.";
-  if (attention === "medication-event") return "Routine planning is withheld while medication guidance is open.";
-  if (locked) return "Loaded training is paused while the training gate is blocked.";
-  if (choice === "full") return "Full volume is selected for this session preview.";
-  if (choice === "reduced") return "Reduced volume is the current plan.";
-  if (choice === "pause") return "Loaded training is paused by your current session choice.";
-  if (gate === "clear") return "The 3:45 check is complete. The volume choice remains open.";
-  return "The session is held. Volume waits until 3:45.";
+function decisionTone(decision: OpenDecision): StatusTone {
+  if (decision.route || decision.gateOutcome === "blocked") return "route";
+  if (decision.domain === "nutrition") return "nutrition";
+  if (decision.domain === "training") return "training";
+  return "recovery";
 }
 
-function gateCopy(
-  gate: ReturnType<typeof useProduct>["derivedDay"]["trainingGate"],
-  attention: ReturnType<typeof useProduct>["derivedDay"]["attention"],
-) {
-  if (attention === "urgent-care") return "A declared urgent demo event has priority. Ashwini stops routine planning and routes to immediate human care; another synthetic check-in cannot clear this handoff.";
-  if (attention === "medication-event") return "A declared unexpected-dose or possible-side-effect event has priority. Get advice from a pharmacist, prescriber, or appropriate urgent service before returning to routine planning.";
-  if (gate === "blocked") return "A declared pain or urgent demo check-in blocked the loaded-training verdict. Full and reduced volume remain unavailable until appropriate human judgment resolves the block.";
-  if (gate === "caution") return "Low energy plus short sleep activates the declared caution rule. Reduced volume is favored, and the session remains optional.";
-  if (gate === "clear") return "The declared 3:45 energy-and-shoulder fixture is clear. Full, reduced, or pause are available as user choices; none is medical clearance.";
-  return "Short sleep is a caution, not a verdict. Use the declared 3:45 energy-and-shoulder check before full volume becomes available.";
+function decisionHeadline(decision: OpenDecision): string {
+  if (decision.route === "emergency") return "Emergency care is the next step.";
+  if (decision.route === "crisis_line") return "An appropriate crisis service is the next step.";
+  if (decision.route === "pharmacist") return "A pharmacist should answer this decision.";
+  if (decision.route === "prescriber") return "Your prescriber should answer this decision.";
+  if (decision.route === "clinician") return "A clinician needs to review this decision.";
+  if (decision.route === "dermatologist")
+    return "This is documented for a dermatologist, not assessed here.";
+  return decision.target ?? (decision.reply.receipt || "A decision is open.");
+}
+
+function routineTone(status: RoutineStatus): StatusTone {
+  if (status === "active") return "training";
+  if (status === "paused") return "warning";
+  return "neutral";
+}
+
+function formatDate(iso: string | null, timeZone: string): string {
+  if (!iso) return "Not scheduled";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  }).format(new Date(iso));
+}
+
+function formatDateTime(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+  }).format(new Date(iso));
 }
 
 export function PlanScreen() {
-  const { derivedDay, selectedTrainingChoice, trainingChoiceSource, chooseTraining, planReceipt } = useProduct();
-  const locked = planIsLocked(derivedDay);
-  const userChoice = trainingChoiceSource === "user";
-  const decisionTiming = derivedDay.attention !== "none"
-    ? "Human handoff · now"
-    : derivedDay.trainingGate === "blocked"
-      ? "Human guidance needed"
-      : userChoice
-        ? selectedTrainingChoice === "pause" ? "User choice · paused" : "Current-session choice"
-        : derivedDay.trainingGate === "clear" || derivedDay.trainingGate === "caution"
-          ? "Decision point · now"
-          : "Decision point · 3:45 PM";
-  const decisionStatus = locked ? "Handoff open" : userChoice ? "Recorded" : derivedDay.trainingGate === "clear" ? "Clear demo gate" : "Rule-based";
-  const decisionTone = locked ? "route" : userChoice && selectedTrainingChoice === "reduced" ? "recovery" : derivedDay.trainingGate === "clear" || userChoice ? "training" : "recovery";
+  const router = useRouter();
+  const {
+    openDecisions,
+    respondToDecision,
+    acknowledgeDecision,
+    loading: recordLoading,
+    respondingDecisionId,
+    error: recordError,
+    decisionReceipt,
+    timeZone: recordTimeZone,
+  } = useProduct();
+  const [snapshot, setSnapshot] = useState<PlanSnapshot | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(true);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [choiceError, setChoiceError] = useState<{
+    readonly decisionId: string;
+    readonly text: string;
+  } | null>(null);
+  const decision = !recordLoading && !recordError ? openDecisions[0] : undefined;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchPlanSnapshot(controller.signal)
+      .then((value) => {
+        setSnapshot(value);
+        setSnapshotError(null);
+      })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        if (cause instanceof RecordApiError && cause.status === 401) {
+          router.replace("/login");
+          return;
+        }
+        setSnapshotError(cause instanceof Error ? cause.message : "Plan records are unavailable.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSnapshotLoading(false);
+      });
+    return () => controller.abort();
+  }, [router]);
+
+  const latestReview = snapshot?.reviews[0];
+  const reviewedRoutine = useMemo(
+    () => snapshot?.routines.find((routine) => routine.id === latestReview?.routineId),
+    [snapshot, latestReview],
+  );
+  const headerStatus =
+    recordLoading || snapshotLoading
+      ? "Loading saved plan records…"
+      : recordError || snapshotError
+        ? "Saved plan records unavailable"
+        : `${openDecisions.length} open decision${openDecisions.length === 1 ? "" : "s"} · ${snapshot?.routines.length ?? 0} saved routine${snapshot?.routines.length === 1 ? "" : "s"}`;
+
+  const choose = async (choice: string) => {
+    if (!decision) return;
+    const decisionId = decision.decisionId;
+    setChoiceError(null);
+    try {
+      await respondToDecision(decisionId, choice);
+    } catch (cause) {
+      setChoiceError({
+        decisionId,
+        text: cause instanceof Error ? cause.message : "The response was not recorded.",
+      });
+    }
+  };
+
+  const acknowledge = async () => {
+    if (!decision) return;
+    const decisionId = decision.decisionId;
+    setChoiceError(null);
+    try {
+      await acknowledgeDecision(decisionId);
+    } catch (cause) {
+      setChoiceError({
+        decisionId,
+        text: cause instanceof Error ? cause.message : "The acknowledgment was not recorded.",
+      });
+    }
+  };
+
+  const planTimeZone = snapshot?.timeZone ?? recordTimeZone;
 
   return (
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
           <Eyebrow>Plan + review</Eyebrow>
-          <h1 id="page-title" tabIndex={-1}>A plan that keeps its reasoning attached.</h1>
-          <p>Current decisions, active routines, and evidence-labeled reviews live together. Nothing here silently becomes medical advice or a personal fact.</p>
+          <h1 id="page-title" tabIndex={-1}>
+            Every plan stays attached to its record.
+          </h1>
+          <p>
+            Open decisions, saved routines, and evidence-labeled reviews appear only when they exist
+            in your private record.
+          </p>
         </div>
         <div className={styles.headerActions}>
-          <Link className={buttonClassName("primary")} href="/check-in">Add a check-in <ArrowIcon /></Link>
-          <span>2 active routines · 1 review due</span>
+          <Link className={buttonClassName("primary")} href="/check-in">
+            Add a check-in <ArrowIcon />
+          </Link>
+          <span>{headerStatus}</span>
         </div>
       </header>
 
-      <section className={`${styles.currentDecision} ${locked ? styles.blockedDecision : ""}`} aria-labelledby="training-choice-title">
+      <section
+        className={`${styles.currentDecision} ${decision?.gateOutcome === "blocked" ? styles.blockedDecision : ""}`}
+        aria-labelledby="current-decision-title"
+      >
         <div className={styles.decisionSummary}>
-          <div className={styles.decisionTopline}>
-            <Status tone={decisionTone}>{decisionStatus}</Status>
-            <span><ClockIcon />{decisionTiming}</span>
-          </div>
-          <Eyebrow>Today’s training decision</Eyebrow>
-          <h2 id="training-choice-title">{choiceHeadline(selectedTrainingChoice, locked, derivedDay.attention, derivedDay.trainingGate)}</h2>
-          <p>{gateCopy(derivedDay.trainingGate, derivedDay.attention)}</p>
-          <div className={styles.decisionBasis}>
-            <span><RuleIcon />{locked ? "Protected state" : userChoice ? "Current-session choice" : "Rule v0.2"}</span>
-            <span>6h 18m sleep</span>
-            <span>{derivedDay.mealStatus === "recorded" ? "Lunch recorded" : "Lunch not complete"}</span>
-            {userChoice && <span>Underlying gate: {derivedDay.trainingGate}</span>}
-            {derivedDay.attention !== "none" && <span>Human handoff open</span>}
-            <span>No medical clearance implied</span>
-          </div>
+          {recordLoading ? (
+            <div className={styles.emptyState}>
+              <Eyebrow>Private record</Eyebrow>
+              <h2 id="current-decision-title">Opening current decisions…</h2>
+              <p>No decision controls are shown until the read completes.</p>
+            </div>
+          ) : recordError ? (
+            <div className={styles.emptyState}>
+              <Eyebrow>Record unavailable</Eyebrow>
+              <h2 id="current-decision-title">Ashwini cannot tell what is current.</h2>
+              <p>{recordError} No plan state is inferred from the failure.</p>
+            </div>
+          ) : decision ? (
+            <>
+              <div className={styles.decisionTopline}>
+                <Status tone={decisionTone(decision)}>
+                  {EVIDENCE_LABEL[decision.evidenceStatus]}
+                </Status>
+                <span>
+                  <ClockIcon />
+                  {formatDateTime(decision.createdAt, recordTimeZone)}
+                </span>
+              </div>
+              <Eyebrow>{DOMAIN_LABEL[decision.domain]}</Eyebrow>
+              <h2 id="current-decision-title">{decisionHeadline(decision)}</h2>
+              <p>{decision.reply.text}</p>
+              <div className={styles.decisionBasis}>
+                <span>
+                  <RuleIcon />
+                  {decision.ruleId}
+                </span>
+                <span>{decision.gateOutcome} gate</span>
+                <span>{decision.advisorVersion}</span>
+                {decision.expectedLag && <span>Expected lag: {decision.expectedLag}</span>}
+                <span>No human review implied</span>
+              </div>
+              <details className={styles.decisionDetails}>
+                <summary>Reasoning and boundary</summary>
+                <dl>
+                  <div>
+                    <dt>Confidence</dt>
+                    <dd>{decision.confidenceNote}</dd>
+                  </div>
+                  <div>
+                    <dt>Gate basis</dt>
+                    <dd>{decision.gateReason}</dd>
+                  </div>
+                  <div>
+                    <dt>Not claimed</dt>
+                    <dd>{decision.refused}</dd>
+                  </div>
+                </dl>
+              </details>
+            </>
+          ) : (
+            <div className={styles.emptyState}>
+              <Eyebrow>Current decisions</Eyebrow>
+              <h2 id="current-decision-title">No open decision.</h2>
+              <p>
+                Ashwini is not filling this space with a default training plan. Add a check-in when
+                something changes or you need help deciding.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className={styles.choicePanel}>
-          <h3>{locked ? "Protected state" : "Choose the current plan"}</h3>
-          <p>{locked
-            ? `${derivedDay.attention !== "none" ? "The open human handoff" : "The active training gate"} keeps loaded training paused. This is a protective system state—not a user selection, diagnosis, or medical conclusion.`
-            : "The user makes the decision. Ashwini keeps the selection and its receipt; it does not make the call for you."}</p>
-          <div className={styles.choiceList}>
-            {trainingChoices.map((choice) => {
-              const safetyDisabled = locked || (choice.id === "full" && derivedDay.trainingGate !== "clear");
-              const holdAfterCheck = choice.id === "hold" && derivedDay.scenarioPhase === "pre-session";
-              const choiceLabel = holdAfterCheck ? "Keep decision open" : choice.label;
-              const choiceDetail = holdAfterCheck ? "Leave volume unselected for now." : choice.detail;
-              const disabledReason = locked && choice.id === "pause"
-                ? "Required while the current handoff is open; another selection cannot resolve it."
-                : locked
-                  ? "Unavailable while the current handoff is open."
-                  : "Available only while the training gate is clear.";
-              return (
+          <h3>
+            {recordLoading
+              ? "Opening decision controls"
+              : recordError
+                ? "Decision controls withheld"
+                : decision
+                  ? decision.choices.length
+                    ? "Your available responses"
+                    : "Acknowledge this prompt"
+                  : "Nothing to answer"}
+          </h3>
+          <p>
+            {recordLoading
+              ? "No response can be recorded until the private record read completes."
+              : recordError
+                ? "Ashwini cannot establish which decision is current, so no stale response is available."
+                : decision
+              ? decision.choices.length > 0
+                ? "These are the exact choices stored with this decision. Selecting one writes a durable response to the record."
+                : "Contact the named professional yourself; Ashwini has not sent a handoff. Acknowledging closes this prompt in the app but does not mark the concern resolved."
+              : "A choice panel appears only when a saved decision includes choices."}
+          </p>
+          {decision?.choices.length ? (
+            <p className={styles.choiceBoundary}>
+              Recording a choice does not contact a provider, start a capture, or change another
+              saved record.
+            </p>
+          ) : null}
+          {decision?.choices.length ? (
+            <div className={styles.choiceList}>
+              {decision.choices.map((choice) => (
                 <button
                   type="button"
-                  key={choice.id}
-                  aria-pressed={selectedTrainingChoice === choice.id}
-                  disabled={safetyDisabled}
-                  onClick={() => chooseTraining(choice.id)}
+                  key={choice}
+                  disabled={respondingDecisionId === decision.decisionId}
+                  onClick={() => void choose(choice)}
                 >
-                  <i aria-hidden="true">{selectedTrainingChoice === choice.id && <CheckIcon />}</i>
-                  <span><strong>{choiceLabel}</strong><small>{safetyDisabled ? disabledReason : choiceDetail}</small></span>
+                  <i aria-hidden="true">
+                    <CheckIcon />
+                  </i>
+                  <span>
+                    <strong>{choice}</strong>
+                    <small>
+                      Record this response against decision {decision.decisionId.slice(0, 8)}.
+                    </small>
+                  </span>
                 </button>
-              );
-            })}
+              ))}
+            </div>
+          ) : null}
+          {decision && decision.choices.length === 0 ? (
+            <div className={styles.choiceList}>
+              <button
+                type="button"
+                disabled={respondingDecisionId === decision.decisionId}
+                onClick={() => void acknowledge()}
+              >
+                <i aria-hidden="true">
+                  <CheckIcon />
+                </i>
+                <span>
+                  <strong>Mark as acknowledged</strong>
+                  <small>Close this prompt only; do not record the concern as resolved.</small>
+                </span>
+              </button>
+            </div>
+          ) : null}
+          <div className={styles.planReceipt} role="status" aria-live="polite">
+            {choiceError && choiceError.decisionId === decision?.decisionId && (
+              <>
+                <InfoIcon />
+                <span>{choiceError.text}</span>
+              </>
+            )}
           </div>
-          <div className={styles.planReceipt} role="status" aria-live="polite">{planReceipt && <><CheckIcon /><span>{planReceipt}</span></>}</div>
         </div>
       </section>
+
+      <div className={styles.planReceipt} role="status" aria-live="polite">
+        {decisionReceipt ? (
+          <>
+            <CheckIcon />
+            <span>
+              {decisionReceipt.text} · decision {decisionReceipt.decisionId.slice(0, 8)}
+            </span>
+          </>
+        ) : null}
+      </div>
 
       <section className={styles.routinesSection} aria-labelledby="routines-title">
         <div className={styles.sectionHeading}>
-          <div><Eyebrow>Active routines</Eyebrow><h2 id="routines-title">What you are deliberately repeating</h2></div>
-          <p>Each routine has one behavior, one target, a review point, and visible confounds.</p>
+          <div>
+            <Eyebrow>Saved routines</Eyebrow>
+            <h2 id="routines-title">What you are deliberately repeating</h2>
+          </div>
+          <p>
+            Counts and reviews come from your saved routine record. Nothing is inferred when a
+            record is missing.
+          </p>
         </div>
 
-        <div className={styles.routineGrid}>
-          {routines.map((routine) => (
-            <article key={routine.id}>
-              <div className={styles.routineTopline}><Status tone={routine.status === "Tracking" ? "recovery" : "nutrition"}>{routine.status}</Status><span>{routine.progress}</span></div>
-              <p>{routine.domain}</p>
-              <h3>{routine.title}</h3>
-              <details>
-                <summary>Routine details and evidence</summary>
-                <dl>
-                  <div><dt>Behavior</dt><dd>{routine.behavior}</dd></div>
-                  <div><dt>Target</dt><dd>{routine.target}</dd></div>
-                  <div><dt>Review</dt><dd>{routine.nextReview}</dd></div>
-                </dl>
-                <p><strong>Current evidence</strong>{routine.evidence}</p>
-                <p><strong>Confounds</strong>{routine.confounds}</p>
-              </details>
-            </article>
-          ))}
-        </div>
+        {snapshotLoading ? (
+          <p className={styles.sectionEmpty} role="status">
+            Loading saved routines…
+          </p>
+        ) : snapshotError ? (
+          <p className={styles.sectionEmpty} role="alert">
+            {snapshotError} No routine count is being inferred.
+          </p>
+        ) : snapshot?.routines.length ? (
+          <div className={styles.routineGrid}>
+            {snapshot.routines.map((routine) => (
+              <article key={routine.id}>
+                <div className={styles.routineTopline}>
+                  <Status tone={routineTone(routine.status)}>{routine.status}</Status>
+                  <span>
+                    {routine.progress.comparable} comparable · {routine.progress.excluded} excluded
+                  </span>
+                </div>
+                <p>{DOMAIN_LABEL[routine.domain]}</p>
+                <h3>{routine.name}</h3>
+                <details>
+                  <summary>Routine details and evidence</summary>
+                  <dl>
+                    <div>
+                      <dt>Behavior</dt>
+                      <dd>{routine.behavior}</dd>
+                    </div>
+                    <div>
+                      <dt>Target</dt>
+                      <dd>{routine.target}</dd>
+                    </div>
+                    <div>
+                      <dt>Expected lag</dt>
+                      <dd>{routine.expectedLag}</dd>
+                    </div>
+                    <div>
+                      <dt>Review</dt>
+                      <dd>{formatDate(routine.reviewAt, planTimeZone)}</dd>
+                    </div>
+                  </dl>
+                  <p>
+                    <strong>Evidence</strong>
+                    {routine.latestReview
+                      ? `${EVIDENCE_LABEL[routine.latestReview.evidenceStatus]} · ${routine.latestReview.summary}`
+                      : "No review recorded yet."}
+                  </p>
+                  <p>
+                    <strong>Confounds</strong>
+                    {routine.confoundIds.length
+                      ? routine.confoundIds.join(", ")
+                      : "None declared in the saved routine."}
+                  </p>
+                  {routine.stopBoundary && (
+                    <p>
+                      <strong>Stop boundary</strong>
+                      {routine.stopBoundary}
+                    </p>
+                  )}
+                </details>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.sectionEmpty}>
+            No active, candidate, or paused routines are saved yet.
+          </p>
+        )}
       </section>
 
       <section className={styles.reviewSection} aria-labelledby="review-title">
-        <div className={styles.reviewLead}>
-          <Eyebrow>Weekly review</Eyebrow>
-          <h2 id="review-title">{weeklyReview.title}</h2>
-          <p>{weeklyReview.summary}</p>
-          <div><Status tone="nutrition">{weeklyReview.status}</Status><Status tone="warning">{weeklyReview.gate} gate</Status></div>
-        </div>
-        <div className={styles.claimPair}>
-          <article><span>Supported</span><strong>{weeklyReview.allowed}</strong></article>
-          <article><span>Not supported</span><strong>{weeklyReview.refused}</strong></article>
-          <small>Next review · {weeklyReview.nextReview}</small>
-        </div>
+        {snapshotLoading ? (
+          <div className={styles.reviewLead}>
+            <Eyebrow>Evidence review</Eyebrow>
+            <h2 id="review-title">Loading saved reviews…</h2>
+            <p>No evidence count or conclusion is shown until the record read completes.</p>
+          </div>
+        ) : snapshotError ? (
+          <div className={styles.reviewLead}>
+            <Eyebrow>Review unavailable</Eyebrow>
+            <h2 id="review-title">Ashwini cannot tell whether a review exists.</h2>
+            <p>{snapshotError} No evidence count or conclusion is being inferred.</p>
+          </div>
+        ) : latestReview ? (
+          <>
+            <div className={styles.reviewLead}>
+              <Eyebrow>Latest saved review</Eyebrow>
+              <h2 id="review-title">{reviewedRoutine?.name ?? "Routine review"}</h2>
+              <p>{latestReview.summary}</p>
+              <div>
+                <Status tone="nutrition">{EVIDENCE_LABEL[latestReview.evidenceStatus]}</Status>
+              </div>
+            </div>
+            <div className={styles.claimPair}>
+              <article>
+                <span>Comparable with</span>
+                <strong>{latestReview.withCount}</strong>
+              </article>
+              <article>
+                <span>Comparable without</span>
+                <strong>{latestReview.withoutCount}</strong>
+              </article>
+              <article>
+                <span>Excluded</span>
+                <strong>{latestReview.excludedCount}</strong>
+              </article>
+              <article>
+                <span>Not supported</span>
+                <strong>{latestReview.refused}</strong>
+              </article>
+              <small>Recorded {formatDateTime(latestReview.reviewedAt, planTimeZone)}</small>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className={styles.reviewLead}>
+              <Eyebrow>Evidence review</Eyebrow>
+              <h2 id="review-title">No review recorded yet.</h2>
+              <p>
+                A review will appear only after a saved routine has enough comparable evidence and
+                an explicit review record.
+              </p>
+            </div>
+            <div className={styles.claimPair}>
+              <small>No evidence count or conclusion has been invented.</small>
+            </div>
+          </>
+        )}
       </section>
 
       <section className={styles.secondarySection} aria-label="Evidence and privacy context">
         <details>
-          <summary><span><InfoIcon /><strong>Evidence labels used here</strong></span><small>Contextual reference</small></summary>
-          <div className={styles.definitionGrid}>{evidenceDefinitions.map((definition) => <article key={definition.status}><strong>{definition.status}</strong><p>{definition.meaning}</p></article>)}</div>
+          <summary>
+            <span>
+              <InfoIcon />
+              <strong>Evidence labels used here</strong>
+            </span>
+            <small>Contextual reference</small>
+          </summary>
+          <div className={styles.definitionGrid}>
+            {EVIDENCE_STATUSES.map((status) => (
+              <article key={status}>
+                <strong>{EVIDENCE_LABEL[status]}</strong>
+                <p>{EVIDENCE_MEANING[status]}</p>
+              </article>
+            ))}
+          </div>
         </details>
         <details>
-          <summary><span><ShieldIcon /><strong>Data and privacy status</strong></span><small>Partly connected</small></summary>
+          <summary>
+            <span>
+              <ShieldIcon />
+              <strong>Data and privacy status</strong>
+            </span>
+            <small>Private record</small>
+          </summary>
           <div className={styles.privacyCopy}>
-            <p>Check-ins are real: they are recorded against your account in managed Postgres, classified by Ashwini&rsquo;s safety rules, and kept append-only, so a correction supersedes a record rather than erasing it. Routines, the weekly review, and the day timeline below are still fixtures, and attachments and the live evidence connector are not wired up.</p>
-            <p>Storage and hosting are disclosed managed processors. Retention, deletion, backups, and a rehearsed restore are documented in the privacy note and remain the gate on ingesting anything beyond your own check-ins.</p>
+            <p>
+              Check-ins, decisions, responses, routines, occurrences, and reviews shown here come
+              from the authenticated private Postgres record. Corrections supersede earlier
+              check-ins instead of erasing them.
+            </p>
+            <p>
+              Photo, voice, and document intake and the live evidence connector are still
+              unavailable. Nothing on this screen implies a licensed provider reviewed the record.
+            </p>
           </div>
         </details>
       </section>

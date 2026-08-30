@@ -6,7 +6,8 @@ import { buttonClassName, Button, Eyebrow, Status, type StatusTone } from "@/com
 import { ArrowIcon, DocumentIcon, EditIcon, InfoIcon, PhotoIcon, TextIcon, VoiceIcon } from "@/components/product/icons";
 import { useProduct } from "@/components/product/product-provider";
 import type { CheckinRecord, PerspectiveTone } from "@/lib/product-model";
-import { hasMeaningfulCheckinInput } from "@/lib/synthetic-scenario";
+import type { OpenDecision } from "@/lib/record-client";
+import { hasMeaningfulCheckinInput } from "@/lib/checkin-input";
 import styles from "./checkin-screen.module.css";
 
 // Openers, not fixtures. The advisor classifies whatever is typed, so these are
@@ -26,23 +27,11 @@ function responseTone(record: CheckinRecord): StatusTone {
   return "neutral";
 }
 
-function currentPlan(
-  mealStatus: ReturnType<typeof useProduct>["derivedDay"]["mealStatus"],
-  training: ReturnType<typeof useProduct>["selectedTrainingChoice"],
-  trainingGate: ReturnType<typeof useProduct>["derivedDay"]["trainingGate"],
-  attention: ReturnType<typeof useProduct>["derivedDay"]["attention"],
-) {
-  if (attention === "urgent-care") return "Urgent human-care handoff open · training plan withheld";
-  if (attention === "medication-event") return "Medication-guidance handoff open · training plan withheld";
-  if (trainingGate === "blocked") return "Training verdict blocked · human guidance needed";
-  if (training === "pause") return "Loaded training paused by your current session choice";
-  if (training === "full") return "Full volume selected · not medical clearance";
-  if (training === "reduced") return "Reduced volume favored · session remains optional";
-  if (trainingGate === "clear") return "3:45 demo check clear · choose full, reduced, or pause";
-  if (mealStatus === "recorded") return "Lunch covered · recheck training at 3:45";
-  if (mealStatus === "needs-detail") return "Lunch occurred · meal detail still open";
-  if (mealStatus === "skipped") return "Lunch remains open · one follow-up needed";
-  return "Lunch missing · training held until 3:45";
+function currentPlan(decision: OpenDecision | undefined, loading: boolean, error: string | null) {
+  if (loading) return "Opening your private record…";
+  if (error) return "Current record unavailable";
+  if (!decision) return "No open decision. Add a check-in when something changes.";
+  return decision.target ?? decision.reply.receipt ?? "Open decision recorded";
 }
 
 function PerspectiveChip({ tone, children }: { tone: PerspectiveTone; children: string }) {
@@ -62,7 +51,6 @@ function LatestResponse({ record, onCorrect }: { record: CheckinRecord; onCorrec
         {record.response.acknowledgement && <p><strong>Acknowledged</strong>{record.response.acknowledgement}</p>}
         {record.response.interpretation && <p><strong>Careful read</strong>{record.response.interpretation}</p>}
         <p><strong>Next step</strong>{record.response.recommendation}</p>
-        {record.response.followUp && <p><strong>One follow-up</strong>{record.response.followUp}</p>}
       </div>
 
       {record.response.perspectives.length > 0 && (
@@ -124,7 +112,7 @@ function HistoryRecord({
 }
 
 export function CheckinScreen() {
-  const { checkins, derivedDay, selectedTrainingChoice, submitCheckin, loading, submitting, error } = useProduct();
+  const { checkins, openDecisions, submitCheckin, loading, submitting, error } = useProduct();
   const [draft, setDraft] = useState("");
   const [latestId, setLatestId] = useState<string | null>(null);
   const [correctionOf, setCorrectionOf] = useState<string | undefined>();
@@ -134,7 +122,7 @@ export function CheckinScreen() {
   const latest = useMemo(() => checkins.find((record) => record.id === latestId) ?? checkins.at(-1), [checkins, latestId]);
   const correctionTarget = useMemo(() => checkins.find((record) => record.id === correctionOf), [checkins, correctionOf]);
   const supersededIds = useMemo(() => new Set(checkins.flatMap((record) => record.correctionOf ? [record.correctionOf] : [])), [checkins]);
-  const canSubmit = hasMeaningfulCheckinInput(draft) && !submitting;
+  const canSubmit = hasMeaningfulCheckinInput(draft) && !submitting && !loading && !error;
 
   useEffect(() => {
     if (!latestId) return;
@@ -151,7 +139,9 @@ export function CheckinScreen() {
     } catch {
       // The draft is deliberately left in the textarea. A failed write must not
       // also cost the user their wording.
-      setModeNotice("That check-in was not recorded. Your wording is still here — try again.");
+      setModeNotice(
+        "That check-in could not be confirmed. Your wording is still here — retrying the unchanged draft will not create a second record.",
+      );
       return;
     }
     setLatestId(record.id);
@@ -176,12 +166,12 @@ export function CheckinScreen() {
       <header className={styles.pageHeader}>
         <div>
           <Eyebrow>One check-in · relevant perspectives</Eyebrow>
-          <h1 id="page-title" tabIndex={-1}>What’s changed since this morning?</h1>
+          <h1 id="page-title" tabIndex={-1}>What changed?</h1>
           <p>Share what happened without choosing a provider, domain, or form. Ashwini records the input, uses only the relevant reasoning lenses, and returns one coordinated next step when the evidence supports one.</p>
         </div>
         <aside>
           <span>Current plan</span>
-          <strong>{currentPlan(derivedDay.mealStatus, selectedTrainingChoice, derivedDay.trainingGate, derivedDay.attention)}</strong>
+          <strong>{currentPlan(openDecisions[0], loading, error)}</strong>
           <small>Recorded, not monitored · nothing here watches you between check-ins</small>
         </aside>
       </header>
@@ -190,7 +180,7 @@ export function CheckinScreen() {
         <div className={styles.composerIntro}>
           <Eyebrow>Check-in</Eyebrow>
           <h2 id="composer-title">What’s going on?</h2>
-          <p>Say what changed in your own words. Ashwini records it, classifies it against its safety rules, and returns one next step — or routes you to a person when that is the right answer.</p>
+          <p>Say what changed in your own words. Ashwini records it, classifies it against its safety rules, and returns one next step — or tells you when to contact a qualified person yourself.</p>
           <div className={styles.modeList} aria-label="Check-in modes">
             <span><TextIcon />Text</span>
             <button type="button" onClick={() => showUnavailableMode("Photo")}><PhotoIcon />Photo</button>
@@ -216,7 +206,16 @@ export function CheckinScreen() {
           </div>
           <div className={styles.composerFooter}>
             <span>Saved to your record · corrections supersede, nothing is deleted</span>
-            <Button type="submit" disabled={!canSubmit}>{submitting ? "Recording…" : "Record check-in"} <ArrowIcon /></Button>
+            <Button type="submit" disabled={!canSubmit}>
+              {submitting
+                ? "Recording…"
+                : loading
+                  ? "Opening record…"
+                  : error
+                    ? "Record unavailable"
+                    : "Record check-in"}{" "}
+              <ArrowIcon />
+            </Button>
           </div>
         </form>
       </section>
@@ -235,7 +234,7 @@ export function CheckinScreen() {
 
       <section className={styles.historySection} aria-labelledby="history-title">
         <div className={styles.historyHeading}>
-          <div><Eyebrow>Today’s continuity</Eyebrow><h2 id="history-title">Check-in history</h2></div>
+          <div><Eyebrow>Continuity</Eyebrow><h2 id="history-title">Recent check-ins</h2></div>
           <p>A chronological record, not a provider chat transcript.</p>
         </div>
 

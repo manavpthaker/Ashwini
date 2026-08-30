@@ -1,6 +1,7 @@
 import "server-only";
 import { Kysely, PostgresDialect } from "kysely";
 import { Pool } from "pg";
+import { postgresConnectionConfig } from "@/lib/postgres-connection";
 import { env } from "../env";
 import type { Database } from "./types";
 
@@ -43,13 +44,11 @@ export function db(): Kysely<Database> {
   instance = new Kysely<Database>({
     dialect: new PostgresDialect({
       pool: new Pool({
-        connectionString: DATABASE_URL,
+        ...postgresConnectionConfig(DATABASE_URL),
         // One connection per serverless instance; a small pool on a real process.
         max: isServerless() ? 1 : 5,
         idleTimeoutMillis: isServerless() ? 10_000 : 30_000,
         connectionTimeoutMillis: 10_000,
-        // Supabase terminates TLS with a public CA; the default verification is
-        // correct here. Do not disable it to silence a certificate error.
       }),
     }),
   });

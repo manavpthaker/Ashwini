@@ -32,6 +32,12 @@ export async function POST(): Promise<Response> {
     },
   );
 
-  await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    return Response.json(
+      { error: "Could not complete sign-out." },
+      { status: 502, headers: { "cache-control": "no-store" } },
+    );
+  }
   return response;
 }

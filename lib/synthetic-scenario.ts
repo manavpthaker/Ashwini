@@ -29,6 +29,9 @@ import type {
   PerspectiveContribution,
   TrainingChoice,
 } from "@/lib/product-model";
+import { hasMeaningfulCheckinInput, withoutCorrectionLabel } from "@/lib/checkin-input";
+
+export { hasMeaningfulCheckinInput } from "@/lib/checkin-input";
 
 const contribution = (
   role: PerspectiveContribution["role"],
@@ -38,10 +41,6 @@ const contribution = (
   basis: string,
 ): PerspectiveContribution => ({ role, tone, state, summary, basis, origin: "ashwini_synthesis" });
 
-function withoutCorrectionLabel(input: string) {
-  return input.replace(/^\s*correction\s*:\s*/i, "");
-}
-
 function normalizedScenario(input: string) {
   return withoutCorrectionLabel(input)
     .trim()
@@ -49,11 +48,6 @@ function normalizedScenario(input: string) {
     .replaceAll("’", "'")
     .replace(/\s+/g, " ")
     .replace(/[.!?]+$/g, "");
-}
-
-export function hasMeaningfulCheckinInput(input: string) {
-  const body = withoutCorrectionLabel(input).trim();
-  return /[\p{L}\p{N}]/u.test(body);
 }
 
 function shortInput(input: string) {

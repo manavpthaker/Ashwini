@@ -8,21 +8,21 @@ const isDev = process.env.NODE_ENV !== "production";
  * `unsafe-inline` for scripts is Next's inline bootstrap; tightening it needs a
  * nonce, which is worth doing once the front end settles.
  *
- * fonts.googleapis.com / fonts.gstatic.com are here because app/globals.css
- * still opens with an @import of three Google font families. Self-hosting them
- * via next/font/local would drop these two entries, remove a render-blocking
- * request, and stop a health app making third-party requests at all.
+ * `next/font` downloads the selected fonts at build time and serves them from
+ * this origin, so the browser does not make a third-party font request.
  */
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "img-src 'self' data: blob:",
   "connect-src 'self'",
   "object-src 'none'",
-  "base-uri 'self'",
+  "media-src 'none'",
+  "base-uri 'none'",
   "form-action 'self'",
+  "frame-src 'none'",
   "frame-ancestors 'none'",
 ].join("; ");
 

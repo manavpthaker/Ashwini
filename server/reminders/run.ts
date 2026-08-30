@@ -9,9 +9,9 @@ import { loggingDispatcher, type ReminderDispatcher } from "./dispatcher";
  * Reads the doses in the current window, asks the pure domain function which of
  * them need a reminder, sends each, and records what happened.
  *
- * Every send is logged, including failures. PRD 11.8 is about reminders being
- * reliable, and a delivery that quietly did not happen is worse than one that
- * visibly did not: the log is how you find out.
+ * Every attempt is logged, including failures. The current placeholder does
+ * not retry a failed row; that limitation is documented rather than presented
+ * as reliable delivery.
  */
 
 /** Wide enough to cover a late scheduler run without re-reading the whole table. */

@@ -1,5 +1,6 @@
 import { EVIDENCE_LABEL, type EvidenceStatus as DomainEvidenceStatus } from "@/domain/evidence";
 import type { Domain } from "@/domain/domains";
+import { SENSITIVE_REDACTION } from "@/domain/advisor/sensitive-content";
 import type {
   CheckinEffect,
   CheckinKind,
@@ -60,6 +61,10 @@ export interface WireReply {
 }
 
 export interface ConversationTurn {
+  /** The durable user-text representation returned by the server. */
+  readonly text: string;
+  /** Record-wide display zone chosen by the owner, not the browser's current zone. */
+  readonly timeZone: string;
   readonly reply: WireReply;
   readonly decisions: readonly WireDecision[];
   readonly records: readonly WireRecordKind[];
@@ -107,11 +112,11 @@ const ROUTE_HEADLINE: Record<WireRouteDestination, string> = {
 const RECORD_LABEL: Record<WireRecordKind, string> = {
   context_note: "Context note kept with this check-in",
   symptom: "Symptom report recorded",
-  meal: "Meal recorded — held as a range, not a number",
+  meal: "Meal occurrence recorded — no nutrition range invented",
   medication_event: "Medication event recorded in the protected lane",
   dermatology_handoff: "Skin observation documented for a dermatologist, not analysed",
-  interaction_check_request: "Interaction check requested",
-  therapy_mention: "Therapy mention recorded as a fact — its content was not stored",
+  interaction_check_request: "Interaction-check need recorded — no external request sent",
+  therapy_mention: "Therapy session fact recorded — content discarded before persistence",
 };
 
 /**
@@ -136,7 +141,8 @@ function effectsFor(turn: ConversationTurn, decision: WireDecision | undefined):
   } = {};
 
   if (turn.records.includes("meal")) {
-    effects.mealStatus = turn.followUp ? "needs-detail" : "recorded";
+    effects.mealStatus =
+      turn.followUp || turn.reply.kind === "question" ? "needs-detail" : "recorded";
   }
 
   if (turn.route) {
@@ -193,14 +199,21 @@ export function toCheckinResponse(turn: ConversationTurn): CheckinResponse {
     recommendation: turn.reply.text,
     ...(turn.followUp ? { followUp: turn.followUp } : {}),
     receipt: turn.reply.receipt,
-    recorded: [
-      "Your wording, retained verbatim",
-      ...turn.records.map((kind) => RECORD_LABEL[kind]),
-    ],
+    recorded: [retainedWordingLabel(turn), ...turn.records.map((kind) => RECORD_LABEL[kind])],
     perspectives: decision ? [perspectiveFor(decision)] : [],
     effects: effectsFor(turn, decision),
     ...(decision ? { refused: decision.refused, gateReason: decision.gateReason } : {}),
   };
+}
+
+function retainedWordingLabel(turn: ConversationTurn): string {
+  if (turn.text === SENSITIVE_REDACTION.crisis) {
+    return "Crisis check-in received — content discarded before persistence";
+  }
+  if (turn.text === SENSITIVE_REDACTION["therapy-content"]) {
+    return "Therapy session mention retained — content discarded before persistence";
+  }
+  return "Your wording, retained verbatim";
 }
 
 function perspectiveFor(decision: WireDecision): PerspectiveContribution {

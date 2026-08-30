@@ -23,6 +23,7 @@ const MANAGED_KEYS = [
   "NETLIFY",
   "NODE_ENV",
   "DATABASE_URL",
+  "ASHWINI_INPUT_HMAC_KEY",
   "ASHWINI_TAILSCALE_USER",
   "ASHWINI_REQUIRE_IDENTITY",
   "NEXT_PUBLIC_SUPABASE_URL",
@@ -44,6 +45,10 @@ function useSupabaseAuth(): void {
   setEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
   setEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test");
   setEnv("ASHWINI_ALLOWED_EMAILS", "owner@example.com");
+}
+
+function useInputHmacKey(): void {
+  setEnv("ASHWINI_INPUT_HMAC_KEY", "test-only-replay-pepper-0000000000");
 }
 
 function request(path = "/api/decisions", headers: Record<string, string> = {}) {
@@ -181,6 +186,19 @@ describe("a public host", () => {
     expect(response.status).toBe(200);
     expect(getUser).toHaveBeenCalled();
   });
+
+  it("refuses multiple identities against the single-owner record", async () => {
+    setEnv("VERCEL", "1");
+    useSupabaseAuth();
+    setEnv("ASHWINI_ALLOWED_EMAILS", "owner@example.com,second@example.com");
+    getUser.mockResolvedValue({
+      data: { user: { id: "u1", email: "owner@example.com" } },
+      error: null,
+    });
+
+    expect((await proxy(request())).status).toBe(403);
+    expect(getUser).not.toHaveBeenCalled();
+  });
 });
 
 describe("the Supabase gate", () => {
@@ -289,13 +307,25 @@ describe("env at boot", () => {
     setEnv("NODE_ENV", "production");
     setEnv("VERCEL", "1");
     setEnv("DATABASE_URL", "postgres://user:pw@example.test:6543/db");
+    useInputHmacKey();
     useSupabaseAuth();
     expect(() => env()).not.toThrow();
+  });
+
+  it("refuses more than one allowlisted owner until rows are tenant-scoped", () => {
+    setEnv("NODE_ENV", "production");
+    setEnv("VERCEL", "1");
+    setEnv("DATABASE_URL", "postgres://user:pw@example.test:6543/db");
+    useInputHmacKey();
+    useSupabaseAuth();
+    setEnv("ASHWINI_ALLOWED_EMAILS", "owner@example.com,second@example.com");
+    expect(() => env()).toThrow(/exactly one account/);
   });
 
   it("boots on a private host with the Tailscale gate", () => {
     setEnv("NODE_ENV", "production");
     setEnv("DATABASE_URL", "postgres://user:pw@example.test:5432/db");
+    useInputHmacKey();
     setEnv("ASHWINI_TAILSCALE_USER", "owner@example.com");
     expect(() => env()).not.toThrow();
   });
@@ -309,8 +339,16 @@ describe("env at boot", () => {
   it("refuses production with the Tailscale gate turned off", () => {
     setEnv("NODE_ENV", "production");
     setEnv("DATABASE_URL", "postgres://user:pw@example.test:5432/db");
+    useInputHmacKey();
     setEnv("ASHWINI_TAILSCALE_USER", "owner@example.com");
     setEnv("ASHWINI_REQUIRE_IDENTITY", "0");
     expect(() => env()).toThrow(/refused in production/);
+  });
+
+  it("refuses production without a replay HMAC key", () => {
+    setEnv("NODE_ENV", "production");
+    setEnv("DATABASE_URL", "postgres://user:pw@example.test:5432/db");
+    setEnv("ASHWINI_TAILSCALE_USER", "owner@example.com");
+    expect(() => env()).toThrow(/ASHWINI_INPUT_HMAC_KEY is required/);
   });
 });

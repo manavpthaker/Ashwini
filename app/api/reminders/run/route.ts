@@ -6,9 +6,9 @@ import { runReminders } from "@/server/reminders/run";
  * The scheduler tick.
  *
  * Called by Vercel Cron (see vercel.json) or by a launchd timer on a
- * self-hosted box. This is also the answer to PRD 11.8's "must not depend
- * solely on the Mac mini": a hosted cron fires whether or not that machine is
- * awake.
+ * self-hosted box. The hosted tick removes the Mac mini dependency from
+ * scheduling, but the default dispatcher does not deliver anything; PRD 11.8
+ * remains open until a real channel and retry policy are wired.
  *
  * It authenticates on a shared secret rather than a user session, because the
  * caller is a scheduler with no session to present. proxy.ts lets it through on

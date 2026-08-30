@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { RULE_PIPELINE, respondSync } from "@/domain/advisor";
+import {
+  classifySensitiveContent,
+  redactSensitiveContent,
+  RULE_PIPELINE,
+  respondSync,
+  SENSITIVE_REDACTION,
+} from "@/domain/advisor";
 import { advisorInput, lisinopril, sertraline } from "./support";
 
 /**
@@ -88,12 +94,36 @@ describe("PRD 11.4 — moles, lesions and pigmented spots are never analysed", (
     expect(reply.text).not.toMatch(/benign|malignant|probably|likely|looks like|appears to be/i);
     expect(reply.text).toMatch(/don't analyse skin marks/i);
   });
+
+  it("does not create an owner skin handoff from a denial, hypothetical, or third party", () => {
+    for (const text of [
+      "I do not have a rash",
+      "My daughter has a changing mole",
+      "If I ever get a rash",
+      "I saw my daughter has a mole",
+      "My daughter has a mole and a rash",
+      "I used to have a rash",
+    ]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).not.toBe("skin-lesion");
+      expect(
+        output.records.some((record) => record.kind === "dermatology_handoff"),
+        text,
+      ).toBe(false);
+    }
+  });
 });
 
 describe("PRD 4.4 / 5 — urgent symptoms route out at level 5", () => {
   const urgent = [
     "i have chest pain",
+    "my chest hurts",
     "crushing pressure in my chest",
+    "severe shortness of breath",
+    "i cannot get enough air",
+    "i feel like i am choking",
+    "i think i am having a heart attack",
+    "i think i am having a stroke",
     "i can't breathe properly",
     "my throat is closing",
     "one side of my face is drooping",
@@ -105,6 +135,27 @@ describe("PRD 4.4 / 5 — urgent symptoms route out at level 5", () => {
     "i'm coughing up blood",
     "there's blood in my stool",
     "i lost my vision suddenly",
+    "fever and a stiff neck",
+    "my neck is stiff and i have a fever",
+    "i just swallowed a bottle of pills",
+    "i took 30 Tylenol",
+    "i overdosed on Tylenol",
+    "i just overdosed",
+    "i swallowed all my pills",
+    "i took too many pills",
+    "i took too much Tylenol",
+    "i took ten Tylenol",
+    "i intentionally took a lot of pills",
+    "i took too much Advil",
+    "i swallowed a bunch of pills",
+    "i took all my pills",
+    "i have taken all my pills",
+    "i took 30 of my pills",
+    "i took too many of my pills",
+    "i swallowed the whole bottle of pills",
+    "i took more pills than i should have",
+    "i accidentally took my pills twice",
+    "i took a double dose",
   ];
 
   for (const utterance of urgent) {
@@ -116,13 +167,79 @@ describe("PRD 4.4 / 5 — urgent symptoms route out at level 5", () => {
     });
   }
 
-  it("retains the original wording as a symptom record", () => {
+  it("routes without converting free text into a clinical symptom fact", () => {
     const output = respondSync(advisorInput("i have chest pain"));
-    expect(output.records).toContainEqual({
-      kind: "symptom",
-      text: "i have chest pain",
-      bodyRegion: null,
-    });
+    expect(output.records).toEqual([{ kind: "context_note", text: "Urgent route-out issued." }]);
+    expect(output.records.some((record) => record.kind === "symptom")).toBe(false);
+  });
+
+  it("does not turn a denial, hypothetical, or historical symptom into a current emergency record", () => {
+    for (const text of [
+      "I do not have chest pain",
+      "If I ever have chest pain, what should I do?",
+      "No chest pain",
+      "I have no chest pain",
+      "I don't have any chest pain",
+      "I never had a seizure",
+      "I have never had a seizure",
+      "I deny chest pain",
+      "I do not have shortness of breath",
+      "No shortness of breath",
+      "I am not having a heart attack",
+      "I am not having a stroke",
+      "I have not passed out",
+      "I haven't fainted",
+      "If I ever overdose",
+      "What if I overdose?",
+      "In case I overdose",
+      "I had chest pain last year",
+      "I used to have chest pain",
+      "I had a seizure as a child",
+      "I fainted five years ago",
+      "I had fever and a stiff neck last week but it resolved",
+    ]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).not.toBe("urgent-symptoms");
+      expect(output.trace.ruleId, text).not.toBe("symptom-msk");
+      expect(
+        output.records.some((record) => record.kind === "symptom"),
+        text,
+      ).toBe(false);
+      expect(output.decisions[0]?.choices, text).toEqual([]);
+    }
+  });
+
+  it("may route a third-party danger but never writes it as the owner's symptom", () => {
+    for (const text of [
+      "My dad has chest pain",
+      "I think my dad has chest pain",
+      "I was there when my wife fainted",
+      "My dad has chest pain and cannot breathe",
+    ]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).toBe("urgent-symptoms");
+      expect(output.reply.text, text).toMatch(/about you or someone else/i);
+      expect(
+        output.records.some((record) => record.kind === "symptom"),
+        text,
+      ).toBe(false);
+    }
+  });
+
+  it("routes a distinct current first-person urgent clause", () => {
+    for (const text of [
+      "My wife is here and I have chest pain",
+      "I have chest pain and my wife is taking me to hospital",
+      "My dad drove me because I cannot breathe",
+      "My friend says I have chest pain",
+      "My husband found me after I fainted",
+      "I did not have chest pain yesterday, but I have chest pain now",
+      "I do not have chest pain but I cannot breathe",
+      "If I ever have chest pain I will call, but right now I cannot breathe",
+      "I never faint, but I fainted today",
+    ]) {
+      expect(ruleFor(text), text).toBe("urgent-symptoms");
+    }
   });
 });
 
@@ -132,6 +249,28 @@ describe("crisis routing", () => {
     "i've been thinking about killing myself",
     "i want to hurt myself",
     "i'm having suicidal thoughts",
+    "i wish i was dead",
+    "i do not think i can go on anymore",
+    "i am going to shoot myself",
+    "i don’t want to live",
+    "i don’t want to be here",
+    "i’d rather be dead",
+    "i wish i wasn’t alive",
+    "i am better off dead",
+    "i plan to jump off a bridge",
+    "i'm going to end it tonight",
+    "i'm going to end it tonight because i can't do this",
+    "i am about to end it and nobody can stop me",
+    "i've decided to end it tonight",
+    "i'm ending it tonight",
+    "i'm thinking about ending it tonight",
+    "i am thinking about ending my life",
+    "i am thinking of ending my life",
+    "i am going to overdose",
+    "i want to overdose",
+    "i plan to overdose",
+    "i'm not safe alone tonight",
+    "i'm going to die tonight",
   ];
 
   for (const utterance of crisis) {
@@ -147,6 +286,56 @@ describe("crisis routing", () => {
     const notes = output.records.filter((record) => record.kind === "context_note");
     expect(notes).toEqual([{ kind: "context_note", text: "Crisis route-out issued." }]);
   });
+
+  it("uses the same crisis boundary for durable redaction", () => {
+    expect(classifySensitiveContent("I don’t want to live")).toBe("crisis");
+    expect(redactSensitiveContent("I don’t want to live")).toBe(SENSITIVE_REDACTION.crisis);
+  });
+
+  it("does not turn ordinary uses of adjacent words into crisis routes", () => {
+    expect(classifySensitiveContent("I'm going to end the workout tonight")).toBeNull();
+    expect(classifySensitiveContent("I'm going to end it with my partner")).toBeNull();
+    expect(classifySensitiveContent("I've decided to end the subscription tonight")).toBeNull();
+    expect(classifySensitiveContent("That joke made me die laughing")).toBeNull();
+    expect(classifySensitiveContent("I'm going to die laughing")).toBeNull();
+    expect(classifySensitiveContent("I'm going to die of embarrassment")).toBeNull();
+    expect(classifySensitiveContent("I'm going to die when she sees this")).toBeNull();
+    expect(classifySensitiveContent("The ladder is not safe to use alone")).toBeNull();
+    expect(classifySensitiveContent("I am not suicidal")).toBeNull();
+    for (const text of [
+      "I do not want to die",
+      "I don't want to kill myself",
+      "I am not going to overdose",
+      "I do not plan to overdose",
+      "I don't plan to end my life",
+      "I am no longer thinking about ending my life",
+      "I do not want to hurt myself",
+    ]) {
+      expect(classifySensitiveContent(text), text).toBeNull();
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).not.toBe("crisis");
+      expect(output.trace.ruleId, text).not.toBe("urgent-symptoms");
+      expect(output.trace.ruleId, text).not.toBe("symptom-msk");
+      expect(
+        output.records.some((record) => record.kind === "symptom"),
+        text,
+      ).toBe(false);
+      expect(output.decisions[0]?.choices, text).toEqual([]);
+    }
+  });
+
+  it("does not let a separate negated clause suppress an affirmative crisis signal", () => {
+    for (const text of [
+      "I am not suicidal but I want to die",
+      "I am not suicidal, but I want to kill myself",
+      "I do not feel suicidal but I cannot keep myself safe",
+      "I am not suicidal now, but I was planning to end my life tonight",
+    ]) {
+      expect(classifySensitiveContent(text), text).toBe("crisis");
+      expect(ruleFor(text), text).toBe("crisis");
+      expect(redactSensitiveContent(text), text).toBe(SENSITIVE_REDACTION.crisis);
+    }
+  });
 });
 
 describe("PRD 11.7 — drug–drug questions go to a pharmacist", () => {
@@ -156,10 +345,18 @@ describe("PRD 11.7 — drug–drug questions go to a pharmacist", () => {
     expect(ruleFor("is it ok to take sertraline and lisinopril together", withMeds)).toBe(
       "drug-drug",
     );
+    expect(ruleFor("is it ok to take sertraline with lisinopril", withMeds)).toBe("drug-drug");
   });
 
   it("fires on one medication plus an interaction verb", () => {
     expect(ruleFor("can i take lisinopril with ibuprofen", withMeds)).toBe("drug-drug");
+  });
+
+  it("attributes the interaction question to the person who would take it", () => {
+    expect(ruleFor("Can I give my dad ibuprofen with lisinopril?", withMeds)).not.toBe("drug-drug");
+    expect(ruleFor("My friend asks whether I can take lisinopril with ibuprofen", withMeds)).toBe(
+      "drug-drug",
+    );
   });
 
   it("recognises a brand-name alias", () => {
@@ -243,9 +440,37 @@ describe("PRD 11.6 / 7.3 — prescription changes go to the prescriber", () => {
     const output = respondSync(advisorInput("should i increase my dose"));
     expect(output.decisions[0]?.refused).toMatch(/will not suggest a dose/i);
   });
+
+  it("does not create a prescriber route for a denied or third-party change", () => {
+    for (const text of [
+      "I did not change my medication dose",
+      "My dad changed his medication dose",
+      "Can I give my dad a double dose",
+    ]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).not.toBe("prescription-change");
+      expect(output.route, text).not.toBe("prescriber");
+    }
+  });
 });
 
 describe("PRD 11.9 — therapy content is inert", () => {
+  const therapyContent = [
+    "my therapist said i should watch my sleep",
+    "my psychiatrist said we discussed trauma",
+    "i met with my psychiatrist and discussed trauma",
+    "in my session today we discussed trauma",
+    "in my mental health session we discussed trauma",
+  ];
+
+  for (const utterance of therapyContent) {
+    it(`keeps "${utterance}" out of every non-therapy rule`, () => {
+      const output = respondSync(advisorInput(utterance));
+      expect(output.trace.ruleId).toBe("therapy-content");
+      expect(output.records).toEqual([{ kind: "therapy_mention" }]);
+    });
+  }
+
   it("records the fact and not the text", () => {
     const output = respondSync(advisorInput("my therapist said i should watch my sleep"));
     expect(output.trace.ruleId).toBe("therapy-content");
@@ -258,6 +483,60 @@ describe("PRD 11.9 — therapy content is inert", () => {
   it("beats the recovery rule even when the sentence mentions sleep", () => {
     expect(ruleFor("therapy ran long so i had bad sleep")).toBe("therapy-content");
   });
+
+  it("stays private without preempting urgent or crisis routing", () => {
+    expect(ruleFor("my therapist and i discussed chest pain")).toBe("urgent-symptoms");
+    expect(ruleFor("my therapist suggested changing my medication dose")).toBe(
+      "prescription-change",
+    );
+    expect(ruleFor("my therapist heard me say i want to die")).toBe("crisis");
+  });
+
+  it("stays private without suppressing any other safety route", () => {
+    const cases = [
+      ["My therapist told me to double my medication dose", "prescription-change"],
+      ["In therapy I said the mole on my back has changed", "skin-lesion"],
+      ["After therapy, can I take lisinopril with ibuprofen?", "drug-drug"],
+      ["In therapy I said that I am pregnant", "pregnancy"],
+    ] as const;
+
+    for (const [text, ruleId] of cases) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).toBe(ruleId);
+      expect(output.reply.text, text).not.toMatch(/saved (?:your|this) (?:wording|question)/i);
+      expect(output.reply.text, text).toMatch(/recorded the route and time/i);
+    }
+  });
+
+  for (const utterance of [
+    "I just left therapy and now I have chest pain",
+    "My therapist told me to call because I can't breathe",
+    "After therapy my throat is closing",
+  ]) {
+    it(`routes the urgent part of mixed protected wording: "${utterance}"`, () => {
+      expect(classifySensitiveContent(utterance)).toBe("therapy-content");
+      expect(ruleFor(utterance)).toBe("urgent-symptoms");
+    });
+  }
+
+  it("uses the same therapy boundary for durable redaction", () => {
+    const input = "In my mental health session we discussed trauma";
+    expect(classifySensitiveContent(input)).toBe("therapy-content");
+    expect(redactSensitiveContent(input)).toBe(SENSITIVE_REDACTION["therapy-content"]);
+  });
+
+  it("leaves ordinary wording unchanged", () => {
+    expect(classifySensitiveContent("I ate lunch")).toBeNull();
+    expect(redactSensitiveContent("I ate lunch")).toBe("I ate lunch");
+  });
+
+  it("redacts but does not create an owner therapy mention for a third party", () => {
+    const text = "My wife went to therapy";
+    const output = respondSync(advisorInput(text));
+    expect(classifySensitiveContent(text)).toBe("therapy-content");
+    expect(output.trace.ruleId).not.toBe("therapy-content");
+    expect(output.records.some((record) => record.kind === "therapy_mention")).toBe(false);
+  });
 });
 
 describe("PRD 4.4 — pregnancy leaves the low-risk domain", () => {
@@ -266,6 +545,10 @@ describe("PRD 4.4 — pregnancy leaves the low-risk domain", () => {
     "we're trying to conceive",
     "i'm breastfeeding, is creatine ok",
     "postpartum and want to restart training",
+    "i am pregnant",
+    "i'm pregnant",
+    "we are pregnant",
+    "we're pregnant",
   ];
 
   for (const utterance of cases) {
@@ -279,6 +562,22 @@ describe("PRD 4.4 — pregnancy leaves the low-risk domain", () => {
   it("outranks the supplement rule", () => {
     // "is creatine ok" would otherwise reach supplement-interaction.
     expect(ruleFor("i'm breastfeeding, is creatine ok")).toBe("pregnancy");
+  });
+
+  it("does not create an owner pregnancy route from a denial, hypothetical, or third party", () => {
+    for (const text of [
+      "I am not pregnant",
+      "My wife is pregnant",
+      "If I become pregnant someday",
+      "I noticed my wife is pregnant",
+      "My wife is pregnant and breastfeeding",
+      "I was pregnant ten years ago",
+      "I was breastfeeding last year",
+    ]) {
+      const output = respondSync(advisorInput(text));
+      expect(output.trace.ruleId, text).not.toBe("pregnancy");
+      expect(output.route, text).not.toBe("clinician");
+    }
   });
 });
 
@@ -309,6 +608,13 @@ describe("adversarial input", () => {
   it("handles an empty utterance without throwing", () => {
     expect(() => respondSync(advisorInput(""))).not.toThrow();
     expect(ruleFor("")).toBe("fallback");
+  });
+
+  it("keeps an urgent human-care boundary in the unclassified fallback", () => {
+    const output = respondSync(advisorInput("something feels seriously wrong"));
+    expect(output.trace.ruleId).toBe("fallback");
+    expect(output.reply.text).toMatch(/immediate danger or new, severe, or worsening symptoms/i);
+    expect(output.reply.text).toMatch(/emergency services or appropriate human care/i);
   });
 });
 

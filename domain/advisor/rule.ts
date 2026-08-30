@@ -15,6 +15,49 @@ export interface RuleContext {
   readonly text: string;
 }
 
+export interface AttributedHealthClause {
+  readonly text: string;
+  /**
+   * `self` requires an explicit first-person health assertion when a named
+   * third party also appears. `third_party` carries across a coordinated
+   * clause ("My dad has chest pain and cannot breathe"). `unspecified` keeps
+   * terse owner check-ins such as "chest pain" usable without pretending a
+   * clearly named family member is the owner.
+   */
+  readonly subject: "self" | "third_party" | "unspecified";
+}
+
+const THIRD_PARTY_SUBJECT =
+  /\b(?:my|our) (?:dad|father|mom|mother|parent|wife|husband|partner|son|daughter|child|friend|brother|sister|roommate|coworker)\b|\b(?:he|she|they|someone) (?:has|have|had|is|are|feels?|felt|reported|says?|took|takes|went|fainted|collapsed)\b/i;
+
+const FIRST_PERSON_HEALTH_ASSERTION =
+  /\b(?:i|we)(?:'m|'re|'ve|'d)?\s+(?:am|are|have|had|feel|felt|cannot|can't|ate|finished|took|taken|swallowed|ingested|fainted|collapsed|passed out|overdosed?|hurt|ache|ached|slept|breastfeed\w*|nurs\w*|pregnan\w*|postpartum)\b|\b(?:(?:can|could|should|would|may) i|i (?:can|could|should|would|may)) (?:take|use|combine|mix|start|change|increase|decrease|raise|lower|double|halve|split|stop|skip|switch|taper)\b|\bmy (?:chest|throat|tongue|face|speech|vision|head|arm|side|leg|stool|vomit|urine|back|neck|shoulder|knee|hip|elbow|wrist|ankle|hamstring|calf|groin|achilles|dose|medication|prescription)\b/i;
+
+/**
+ * Split free-form health text without losing who a coordinated clause belongs
+ * to. This is deliberately conservative: a named third party wins unless the
+ * same clause contains a concrete first-person health assertion.
+ */
+export function attributedHealthClauses(text: string): readonly AttributedHealthClause[] {
+  const clauses = text
+    .split(/(?:[,.!?;]+|\b(?:and|but|however|because|after|while|although|yet)\b)/)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+
+  let carried: AttributedHealthClause["subject"] = "unspecified";
+  return clauses.map((clause) => {
+    const hasThirdParty = THIRD_PARTY_SUBJECT.test(clause);
+    const hasExplicitSelf = FIRST_PERSON_HEALTH_ASSERTION.test(clause);
+    const subject = hasExplicitSelf ? "self" : hasThirdParty ? "third_party" : carried;
+    carried = subject;
+    return { text: clause, subject };
+  });
+}
+
+export function isOwnerHealthClause(clause: AttributedHealthClause): boolean {
+  return clause.subject !== "third_party";
+}
+
 export interface RuleOutcome {
   readonly domain: Domain;
   readonly evidenceStatus: EvidenceStatus;
@@ -84,5 +127,10 @@ export function containsWord(haystack: string, needle: string): boolean {
 }
 
 export function normalize(text: string): string {
-  return text.toLowerCase().replace(/\s+/g, " ").trim();
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201b\u02bc]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
 }

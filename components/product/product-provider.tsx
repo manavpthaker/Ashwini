@@ -1,161 +1,317 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { CheckinRecord, DerivedDayState, TrainingChoice } from "@/lib/product-model";
-import { toCheckinResponse } from "@/lib/checkin-adapter";
-import { fetchHistory, postCheckin, type HistoricTurn, type SubmittedTurn } from "@/lib/checkin-client";
+import { useRouter } from "next/navigation";
 import {
-  checkinTouchesPlanGate,
-  chooseTrainingForState,
-  deriveDayState,
-  manualChoiceAfterGateChange,
-  selectionForState,
-} from "@/lib/synthetic-scenario";
-
-/**
- * Check-in state, held by the API rather than by this component.
- *
- * The screens were built against `lib/synthetic-scenario.ts`, which decides what
- * a check-in means by matching declared demo phrases against an exact-string
- * Set. Everything the user actually types now goes to `POST /api/conversation`,
- * where the rule pipeline in `domain/advisor` classifies it and the record is
- * written to Postgres. What survives from the synthetic module is the part that
- * was never about interpretation: `deriveDayState` reducing a list of records
- * into the day's state, and the absorbing-block rules that keep a safety route-
- * out visible until it is corrected (PRD 4.4). Those now reduce over effects the
- * server established.
- */
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import type { CheckinRecord } from "@/lib/product-model";
+import { toCheckinResponse } from "@/lib/checkin-adapter";
+import {
+  ConversationError,
+  createRetrySafeCheckinWriter,
+  fetchHistory,
+  type HistoricTurn,
+  type SubmittedTurn,
+} from "@/lib/checkin-client";
+import {
+  acknowledgeOpenDecision,
+  fetchOpenDecisions,
+  RecordApiError,
+  respondToOpenDecision,
+  type OpenDecision,
+} from "@/lib/record-client";
 
 interface ProductContextValue {
   checkins: readonly CheckinRecord[];
-  derivedDay: DerivedDayState;
-  selectedTrainingChoice: TrainingChoice;
-  trainingChoiceSource: "rule" | "user" | "gate";
-  planReceipt: string;
-  /** Rejects rather than throws: the write is a round trip now. */
+  openDecisions: readonly OpenDecision[];
   submitCheckin: (input: string, correctionOf?: string) => Promise<CheckinRecord>;
-  chooseTraining: (choice: TrainingChoice) => void;
-  /** True while the first history load is in flight. */
+  respondToDecision: (decisionId: string, choice: string) => Promise<void>;
+  acknowledgeDecision: (decisionId: string) => Promise<void>;
   loading: boolean;
   submitting: boolean;
-  /** Set when the API could not be reached or refused the write. */
+  respondingDecisionId: string | null;
   error: string | null;
+  decisionReceipt: { readonly decisionId: string; readonly text: string } | null;
+  timeZone: string;
 }
 
 const ProductContext = createContext<ProductContextValue | null>(null);
 
-const timeFormat = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
-
-function displayTime(iso: string): string {
+function displayTime(iso: string, timeZone: string): string {
   const at = new Date(iso);
-  return Number.isNaN(at.getTime()) ? "" : timeFormat.format(at);
+  return Number.isNaN(at.getTime())
+    ? ""
+    : new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone,
+      }).format(at);
 }
 
-function toRecord(turn: SubmittedTurn | HistoricTurn, input: string, correctionOf?: string): CheckinRecord {
+function toRecord(
+  turn: SubmittedTurn | HistoricTurn,
+  input: string,
+  correctionOf?: string,
+): CheckinRecord {
   return {
     id: turn.userMessageId,
-    time: displayTime(turn.ts),
-    originalInput: input.trim(),
+    recordedAt: turn.ts,
+    time: displayTime(turn.ts, turn.timeZone),
+    originalInput: displayInput(turn, input),
     modality: "text",
     ...(correctionOf ? { correctionOf } : {}),
     response: toCheckinResponse(turn),
   };
 }
 
+function displayInput(turn: SubmittedTurn | HistoricTurn, input: string): string {
+  return turn.text.trim() || input.trim();
+}
+
 export function ProductProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const checkinWriter = useRef<ReturnType<typeof createRetrySafeCheckinWriter> | null>(null);
+  if (checkinWriter.current === null) checkinWriter.current = createRetrySafeCheckinWriter();
   const [checkins, setCheckins] = useState<readonly CheckinRecord[]>([]);
-  const [manualTrainingChoice, setManualTrainingChoice] = useState<TrainingChoice | null>(null);
-  const [planReceipt, setPlanReceipt] = useState("");
+  const [openDecisions, setOpenDecisions] = useState<readonly OpenDecision[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [respondingDecisionId, setRespondingDecisionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [decisionReceipt, setDecisionReceipt] = useState<{
+    readonly decisionId: string;
+    readonly text: string;
+  } | null>(null);
+  const [timeZone, setTimeZone] = useState("UTC");
 
-  const derivedDay = useMemo(() => deriveDayState(checkins), [checkins]);
-  const trainingSelection = selectionForState(derivedDay, manualTrainingChoice);
+  const handleFailure = useCallback((cause: unknown, fallback: string) => {
+    if (statusOf(cause) === 401) {
+      setCheckins([]);
+      setOpenDecisions([]);
+      router.replace("/login");
+      return;
+    }
+    setError(cause instanceof Error ? cause.message : fallback);
+  }, [router]);
+
+  const handleMutationFailure = useCallback(
+    (cause: unknown, fallback: string) => {
+      const status = statusOf(cause);
+      // Validation/conflict responses describe this attempted write, not the
+      // availability of the record the screens already loaded. The screen that
+      // initiated the action renders the error locally.
+      if (status !== null && status >= 400 && status < 500 && status !== 401) return;
+      handleFailure(cause, fallback);
+    },
+    [handleFailure],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
 
-    fetchHistory({ signal: controller.signal })
-      .then((turns) => {
+    Promise.all([
+      fetchHistory({ signal: controller.signal }),
+      fetchOpenDecisions(controller.signal),
+    ])
+      .then(([history, decisions]) => {
+        const turns = history.turns;
+        setTimeZone(history.timeZone);
         setCheckins(
           turns.map((turn) =>
             toRecord(
               turn,
               turn.text,
-              // The stored link points from the corrected message forward. The
-              // screens read it the other way round, so it is inverted here.
               turns.find((other) => other.correctedBy === turn.userMessageId)?.userMessageId,
             ),
           ),
         );
+        setOpenDecisions(decisions);
         setError(null);
       })
       .catch((cause: unknown) => {
-        if (controller.signal.aborted) return;
-        // PRD 6 of the offline rules: an unreachable record reads as unknown,
-        // never as an empty day. The screens show the error rather than a
-        // confident "nothing recorded yet".
-        setError(cause instanceof Error ? cause.message : "Could not reach the record.");
+        if (!controller.signal.aborted) handleFailure(cause, "Could not reach your record.");
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
 
     return () => controller.abort();
-  }, []);
+  }, [handleFailure]);
 
   const submitCheckin = useCallback(
     async (input: string, correctionOf?: string) => {
       setSubmitting(true);
       try {
-        const turn = await postCheckin(input, correctionOf ? { correctionOf } : {});
+        const turn = await checkinWriter.current!.submit(
+          input,
+          correctionOf ? { correctionOf } : {},
+        );
         const record = toRecord(turn, input, correctionOf);
-        const correctedRecord = correctionOf
-          ? checkins.find((existing) => existing.id === correctionOf)
-          : undefined;
-
-        setCheckins((current) => [...current, record]);
-        if (checkinTouchesPlanGate(record, correctedRecord)) {
-          setManualTrainingChoice((current) => manualChoiceAfterGateChange(current));
-        }
-        setPlanReceipt("");
+        setCheckins((current) =>
+          current.some((item) => item.id === record.id)
+            ? current.map((item) => (item.id === record.id ? record : item))
+            : [...current, record],
+        );
+        setDecisionReceipt(null);
         setError(null);
+
+        try {
+          setOpenDecisions(await fetchOpenDecisions());
+        } catch (refreshError) {
+          handleFailure(
+            refreshError,
+            "The check-in was recorded, but current decisions could not be refreshed.",
+          );
+        }
+
         return record;
       } catch (cause: unknown) {
-        const message = cause instanceof Error ? cause.message : "The check-in was not recorded.";
-        setError(message);
+        handleMutationFailure(cause, "The check-in was not recorded.");
         throw cause;
       } finally {
         setSubmitting(false);
       }
     },
-    [checkins],
+    [handleFailure, handleMutationFailure],
   );
 
-  const chooseTraining = useCallback(
-    (choice: TrainingChoice) => {
-      const result = chooseTrainingForState(derivedDay, manualTrainingChoice, choice);
-      setManualTrainingChoice(result.manualChoice);
-      setPlanReceipt(result.receipt);
+  const respondToDecision = useCallback(
+    async (decisionId: string, choice: string) => {
+      setRespondingDecisionId(decisionId);
+      setDecisionReceipt(null);
+      try {
+        await respondToOpenDecision(decisionId, choice);
+        setOpenDecisions((current) =>
+          current.filter((decision) => decision.decisionId !== decisionId),
+        );
+        setDecisionReceipt({
+          decisionId,
+          text: `Recorded · ${choice}`,
+        });
+        setError(null);
+
+        try {
+          setOpenDecisions(await fetchOpenDecisions());
+        } catch (refreshError) {
+          handleFailure(
+            refreshError,
+            "Your response was recorded, but current decisions could not be refreshed.",
+          );
+        }
+      } catch (cause: unknown) {
+        if (statusOf(cause) === 409) {
+          try {
+            setOpenDecisions(await fetchOpenDecisions());
+          } catch (refreshError) {
+            handleFailure(refreshError, "Current decisions could not be refreshed.");
+          }
+        }
+        handleMutationFailure(cause, "The response was not recorded.");
+        throw cause;
+      } finally {
+        setRespondingDecisionId(null);
+      }
     },
-    [derivedDay, manualTrainingChoice],
+    [handleFailure, handleMutationFailure],
   );
 
-  const value: ProductContextValue = {
-    checkins,
-    derivedDay,
-    selectedTrainingChoice: trainingSelection.choice,
-    trainingChoiceSource: trainingSelection.source,
-    planReceipt,
-    submitCheckin,
-    chooseTraining,
-    loading,
-    submitting,
-    error,
-  };
+  const acknowledgeDecision = useCallback(
+    async (decisionId: string) => {
+      setRespondingDecisionId(decisionId);
+      setDecisionReceipt(null);
+      try {
+        await acknowledgeOpenDecision(decisionId);
+        setOpenDecisions((current) =>
+          current.filter((decision) => decision.decisionId !== decisionId),
+        );
+        setDecisionReceipt({
+          decisionId,
+          text: "Acknowledged · this prompt is closed; the underlying concern is not marked resolved.",
+        });
+        setError(null);
 
-  return <ProductContext.Provider value={value}>{children}</ProductContext.Provider>;
+        try {
+          setOpenDecisions(await fetchOpenDecisions());
+        } catch (refreshError) {
+          handleFailure(
+            refreshError,
+            "The acknowledgment was recorded, but current decisions could not be refreshed.",
+          );
+        }
+      } catch (cause: unknown) {
+        if (statusOf(cause) === 409) {
+          try {
+            setOpenDecisions(await fetchOpenDecisions());
+          } catch (refreshError) {
+            handleFailure(refreshError, "Current decisions could not be refreshed.");
+          }
+        }
+        handleMutationFailure(cause, "The acknowledgment was not recorded.");
+        throw cause;
+      } finally {
+        setRespondingDecisionId(null);
+      }
+    },
+    [handleFailure, handleMutationFailure],
+  );
+
+  useEffect(() => {
+    const expirations = openDecisions
+      .map((decision) => (decision.expiresAt ? new Date(decision.expiresAt).getTime() : NaN))
+      .filter((value) => Number.isFinite(value) && value > Date.now());
+    if (expirations.length === 0) return;
+
+    const nextExpiry = Math.min(...expirations);
+    const delay = Math.min(Math.max(nextExpiry - Date.now() + 100, 0), 2_147_000_000);
+    const timer = window.setTimeout(() => {
+      setOpenDecisions((current) =>
+        current.filter(
+          (decision) => !decision.expiresAt || new Date(decision.expiresAt).getTime() > Date.now(),
+        ),
+      );
+      void fetchOpenDecisions()
+        .then((decisions) => {
+          setOpenDecisions(decisions);
+          setError(null);
+        })
+        .catch((cause: unknown) =>
+          handleFailure(cause, "Current decisions could not be refreshed after expiry."),
+        );
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [handleFailure, openDecisions]);
+
+  return (
+    <ProductContext.Provider
+      value={{
+        checkins,
+        openDecisions,
+        submitCheckin,
+        respondToDecision,
+        acknowledgeDecision,
+        loading,
+        submitting,
+        respondingDecisionId,
+        error,
+        decisionReceipt,
+        timeZone,
+      }}
+    >
+      {children}
+    </ProductContext.Provider>
+  );
+}
+
+function statusOf(cause: unknown): number | null {
+  if (cause instanceof ConversationError || cause instanceof RecordApiError) return cause.status;
+  return null;
 }
 
 export function useProduct() {

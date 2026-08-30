@@ -1,6 +1,13 @@
 import { z } from "zod";
+import { redactSensitiveContent } from "@/domain/advisor";
 import { db } from "@/server/db/client";
-import { handleUtterance } from "@/server/advisor-service";
+import {
+  CorrectionTargetError,
+  handleUtterance,
+  IdempotencyConflictError,
+} from "@/server/advisor-service";
+import { currentPrincipal } from "@/server/auth";
+import { env } from "@/server/env";
 
 /**
  * The single conversational intake (PRD 4.3).
@@ -33,6 +40,8 @@ const postSchema = z.object({
 });
 
 export async function POST(request: Request): Promise<Response> {
+  if (!(await currentPrincipal(request))) return problem(401, "Not signed in.");
+
   let body: unknown;
   try {
     body = await request.json();
@@ -43,6 +52,10 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = postSchema.safeParse(body);
   if (!parsed.success) {
     return problem(400, parsed.error.issues.map((issue) => issue.message).join(" "));
+  }
+
+  if (parsed.data.attachments?.length) {
+    return problem(501, "Attachment intake is not connected on this deployment.");
   }
 
   try {
@@ -57,6 +70,9 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json(
       {
         userMessageId: result.userMessageId,
+        userText: result.userText,
+        timeZone: env().ASHWINI_TIME_ZONE,
+        ts: result.ts.toISOString(),
         advisorMessageId: result.advisorMessageId,
         decisionIds: result.decisionIds,
         replayed: result.replayed,
@@ -76,7 +92,10 @@ export async function POST(request: Request): Promise<Response> {
       { status: result.replayed ? 200 : 201, headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
-    return problem(500, error instanceof Error ? error.message : "Unexpected failure.");
+    if (error instanceof IdempotencyConflictError) return problem(409, error.message);
+    if (error instanceof CorrectionTargetError) return problem(409, error.message);
+    console.error("Check-in write failed", error);
+    return problem(503, "The check-in record is temporarily unavailable.");
   }
 }
 
@@ -95,6 +114,8 @@ const getSchema = z.object({
  * appearance only. `limit` counts turns, not rows.
  */
 export async function GET(request: Request): Promise<Response> {
+  if (!(await currentPrincipal(request))) return problem(401, "Not signed in.");
+
   const url = new URL(request.url);
   const parsed = getSchema.safeParse(Object.fromEntries(url.searchParams));
   if (!parsed.success) {
@@ -103,6 +124,7 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     const kysely = db();
+    const timeZone = env().ASHWINI_TIME_ZONE;
     let query = kysely
       .selectFrom("ashwini.messages")
       .select([
@@ -129,7 +151,10 @@ export async function GET(request: Request): Promise<Response> {
     const userIds = userMessages.map((message) => message.message_id);
 
     if (userIds.length === 0) {
-      return Response.json({ turns: [] }, { headers: { "cache-control": "no-store" } });
+      return Response.json(
+        { turns: [], timeZone },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
 
     const replies = await kysely
@@ -180,12 +205,13 @@ export async function GET(request: Request): Promise<Response> {
         userMessage: {
           messageId: message.message_id,
           ts: message.ts,
-          text: message.text,
+          // Defense in depth for pre-boundary rows: recognized crisis or
+          // therapy wording never reaches rendered history even if an older
+          // deployment stored it before the persistence classifier existed.
+          text: redactSensitiveContent(message.text),
           correctedBy: message.corrected_by,
         },
-        reply: reply
-          ? { text: reply.text, kind: reply.kind, receipt: reply.receipt ?? "" }
-          : null,
+        reply: reply ? { text: reply.text, kind: reply.kind, receipt: reply.receipt ?? "" } : null,
         decisions: rows.map((row) => ({
           type: row.type,
           domain: row.domain,
@@ -205,9 +231,10 @@ export async function GET(request: Request): Promise<Response> {
       };
     });
 
-    return Response.json({ turns }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ turns, timeZone }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
-    return problem(500, error instanceof Error ? error.message : "Unexpected failure.");
+    console.error("Check-in history query failed", error);
+    return problem(503, "Check-in history is temporarily unavailable.");
   }
 }
 

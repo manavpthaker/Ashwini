@@ -61,6 +61,99 @@ export function localDay(clock: Clock, at: Date = clock.now()): string {
   }).format(at);
 }
 
+export interface DayWindow {
+  /** The configured-zone calendar day, YYYY-MM-DD. */
+  readonly day: string;
+  /** Inclusive UTC instant at local midnight. */
+  readonly start: Date;
+  /** Exclusive UTC instant at the next local midnight. */
+  readonly end: Date;
+}
+
+/**
+ * Resolve one local calendar day to real UTC instants.
+ *
+ * Appending `T00:00:00Z` to a local date is wrong anywhere outside UTC and is
+ * especially wrong across daylight-saving changes. Intl gives us the civil
+ * time represented by a candidate instant; a short fixed-point adjustment then
+ * finds the instant whose civil time is the requested midnight.
+ */
+export function dayWindow(clock: Clock, at: Date = clock.now()): DayWindow {
+  const day = localDay(clock, at);
+  const nextDay = addCalendarDay(day);
+  return {
+    day,
+    start: zonedMidnight(day, clock.timeZone()),
+    end: zonedMidnight(nextDay, clock.timeZone()),
+  };
+}
+
+function addCalendarDay(day: string): string {
+  const [year, month, date] = parseDay(day);
+  const next = new Date(Date.UTC(year, month - 1, date + 1));
+  return [
+    next.getUTCFullYear(),
+    String(next.getUTCMonth() + 1).padStart(2, "0"),
+    String(next.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function zonedMidnight(day: string, timeZone: string): Date {
+  const [year, month, date] = parseDay(day);
+  const wanted = Date.UTC(year, month - 1, date, 0, 0, 0);
+  let candidate = wanted;
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    const parts = civilParts(new Date(candidate), timeZone);
+    const represented = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+    );
+    const correction = wanted - represented;
+    candidate += correction;
+    if (correction === 0) break;
+  }
+
+  return new Date(candidate);
+}
+
+function parseDay(day: string): readonly [number, number, number] {
+  // Internal only: `day` is produced by localDay(), which owns this format.
+  const parts = day.split("-");
+  return [Number(parts[0]!), Number(parts[1]!), Number(parts[2]!)];
+}
+
+function civilParts(at: Date, timeZone: string) {
+  const values = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(at)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)]),
+  );
+
+  return {
+    year: values.year as number,
+    month: values.month as number,
+    day: values.day as number,
+    hour: (values.hour as number) % 24,
+    minute: values.minute as number,
+    second: values.second as number,
+  };
+}
+
 function hourIn(timeZone: string, at: Date): number {
   const hour = new Intl.DateTimeFormat("en-US", {
     timeZone,

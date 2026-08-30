@@ -17,14 +17,11 @@ export async function GET(): Promise<Response> {
       { status: "ok", database: "reachable", latencyMs: Date.now() - startedAt },
       { headers: { "cache-control": "no-store" } },
     );
-  } catch (error) {
+  } catch {
     return Response.json(
       {
         status: "degraded",
         database: "unreachable",
-        // The message can name a host; it never carries a credential, because
-        // env.ts is the only thing that reads DATABASE_URL.
-        detail: error instanceof Error ? error.message : "unknown error",
       },
       { status: 503, headers: { "cache-control": "no-store" } },
     );

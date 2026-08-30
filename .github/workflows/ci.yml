@@ -31,6 +31,7 @@ jobs:
 
     env:
       ASHWINI_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/ashwini_test
+      ASHWINI_INPUT_HMAC_KEY: ci-only-replay-pepper-000000000000
 
     steps:
       - uses: actions/checkout@v4

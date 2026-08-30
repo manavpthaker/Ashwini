@@ -11,6 +11,7 @@
  */
 
 import { Client } from "pg";
+import { postgresConnectionConfig } from "../lib/postgres-connection";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -25,7 +26,7 @@ async function main(): Promise<void> {
     throw new Error("Set ASHWINI_ALLOW_SEED=1 to confirm you mean to write synthetic records.");
   }
 
-  const client = new Client({ connectionString });
+  const client = new Client(postgresConnectionConfig(connectionString));
   await client.connect();
 
   try {

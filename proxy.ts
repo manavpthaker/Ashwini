@@ -147,12 +147,11 @@ function tailscaleGate(
  * branch does not depend on detecting a database correctly, and a missed
  * detection cannot open a hole.
  *
- * A page document is a different question, and the first version of this got it
- * wrong by treating it as the same one. The three pages are prerendered: they
- * contain fixtures and a "not connected" state, and every byte of health data
- * they could ever show arrives from the API this function is already refusing.
- * With no DATABASE_URL there is no record behind them at all, so refusing them
- * protected nothing and made the interface impossible to look at.
+ * A page document is a different question. The product pages render explicit
+ * loading, unavailable, and empty states; every saved health record they can
+ * show arrives from the API this function is already refusing. With no
+ * DATABASE_URL there is no record behind them at all, so refusing the document
+ * would protect nothing and make the interface impossible to inspect.
  *
  * The moment a database is configured, pages are refused too. Not because the
  * prerendered ones became dangerous, but because a future server-rendered page

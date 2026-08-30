@@ -3,7 +3,7 @@ import { PlanScreen } from "@/components/product/plan-screen";
 
 export const metadata: Metadata = {
   title: "Plan",
-  description: "Current decisions, active routines, and evidence-labeled review.",
+  description: "Saved decisions, routines, responses, and evidence-labeled reviews.",
 };
 
 export default function PlanPage() {

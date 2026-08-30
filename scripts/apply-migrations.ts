@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Client } from "pg";
+import { postgresConnectionConfig } from "../lib/postgres-connection";
 
 const MIGRATIONS_DIR = join(process.cwd(), "supabase", "migrations");
 
@@ -29,7 +30,7 @@ async function main(): Promise<void> {
     throw new Error(`No migrations found in ${MIGRATIONS_DIR}`);
   }
 
-  const client = new Client({ connectionString });
+  const client = new Client(postgresConnectionConfig(connectionString));
   await client.connect();
 
   try {

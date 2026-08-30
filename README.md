@@ -8,15 +8,15 @@ The working domain is **ashwini.health**. The product does not diagnose, prescri
 
 ## What is real
 
-Check-ins are real. Typing one sends it to `POST /api/conversation`, where the rule pipeline in [`domain/advisor/`](domain/advisor) classifies it, the safety boundaries in [`domain/evidence.ts`](domain/evidence.ts) constrain what may be said about it, and the result is written to Postgres inside one transaction. Reload the page and it is still there, because it is a record rather than a component's state. Corrections supersede rather than overwrite, and the database enforces that with triggers instead of trusting the application to be careful.
+The authenticated interface is record-backed. Check-ins go through `POST /api/conversation`; Today loads stored meals, doses, commitments, sessions, check-ins, and unresolved decisions; Plan loads stored decisions, responses, routines, occurrences, and reviews. Selecting an offered decision choice writes to `ashwini.decision_responses` and survives refresh. An empty database produces empty states, not the former training-day fixture.
 
-Still fixtures: routines, the weekly review, and the day timeline on Today and Plan. Photo, voice, and document intake are not wired up, no personal health source is connected, no image or document analysis runs, and no model provider is in use.
+The advisor is still a deterministic rule pipeline, not a model or a panel of providers. Photo, voice, and document intake, automatic medication-to-dose matching, external interaction-check execution, image/document analysis, and a model-backed multidisciplinary synthesis are not connected. The UI says so instead of fabricating their results.
 
 The three routes:
 
-- **Today — `/`:** the current recommendation, its evidence state, the relevant perspectives, and a compact timeline.
+- **Today — `/`:** the highest-priority unresolved saved decision and a timeline assembled only from stored records.
 - **Check-in — `/check-in`:** one intake for food, energy, sleep, pain, medication context, or questions, followed by a structured response and chronological record rather than a chat transcript.
-- **Plan — `/plan`:** the current decision, user-owned plan choice, active routines, weekly review, and contextual evidence/privacy details.
+- **Plan — `/plan`:** unresolved saved decisions and durable responses, active routine records, latest evidence reviews, and contextual evidence/privacy details.
 
 The authoritative product contract is [`docs/PRD.md`](docs/PRD.md). Visual, interaction, responsive, accessibility, and language rules are in [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md). The API is documented in [`docs/API.md`](docs/API.md).
 
@@ -48,7 +48,7 @@ ASHWINI_TEST_DATABASE_URL=postgres://…/ashwini_test pnpm test
 
 The app runs in one of two shapes, and the identity gate picks the right one from what you configure — there is no mode flag.
 
-**Vercel (the current deployment).** Requires Supabase auth: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `ASHWINI_ALLOWED_EMAILS`. The legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` name remains accepted as a fallback. Without a complete configuration the app **serves nothing but the empty shell**, and there is no override — the alternative gate reads a header that only `tailscale serve` can be trusted to set, and on a public host any caller can forge it.
+**Vercel (the current deployment).** Requires Supabase auth: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `ASHWINI_ALLOWED_EMAILS`, plus a server-only random `ASHWINI_INPUT_HMAC_KEY` of at least 32 characters. The allowlist must contain exactly one account because the current schema is a single-owner record; multiple identities fail closed until rows have tenant ownership. The legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` name remains accepted as a fallback. Without a complete configuration the app **serves nothing but the empty shell**, and there is no override — the alternative gate reads a header that only `tailscale serve` can be trusted to set, and on a public host any caller can forge it.
 
 What "nothing but the shell" means, precisely, because the distinction is the whole safety argument:
 
@@ -58,11 +58,12 @@ What "nothing but the shell" means, precisely, because the distinction is the wh
 | No auth, **no** `DATABASE_URL` | served  | 403      |
 | No auth, **a** `DATABASE_URL`  | 403     | 403      |
 
-The API is refused whenever real authentication is missing, unconditionally — it is the only path to a record, so this branch does not depend on detecting a database and a missed detection cannot open a hole. Pages are the separate question: the three routes are prerendered and hold fixtures plus a "not connected" state, so with no database behind them there is nothing to protect and refusing them only made the interface impossible to look at. The moment a `DATABASE_URL` exists, pages are refused too — not because the prerendered ones became dangerous, but so a future server-rendered page cannot quietly read that database.
+The API is refused whenever real authentication is missing, unconditionally — it is the only path to a record, so this branch does not depend on detecting a database and a missed detection cannot open a hole. Pages are the separate question: the product shell contains no personal data and every record-bearing field arrives through a refused API. With no database behind the deployment there is nothing to expose, so the empty interface may render. The moment a `DATABASE_URL` exists, pages are refused too unless real authentication is configured, so a future server-rendered page cannot quietly read that database.
 
 - Use the **transaction-mode pooler, port 6543**. Each serverless invocation may be a fresh process, so pooling has to happen upstream; the pool is capped at one connection per instance.
+- Every non-loopback PostgreSQL connection uses TLS with certificate and hostname verification. Insecure `sslmode` values are refused, and TLS query parameters are removed before `pg` receives the URL so they cannot override that policy. Plaintext is allowed only for loopback development and test databases.
 - `output: "standalone"` is deliberately not set on Vercel. Vercel builds its own output, and forcing standalone alongside a stale project "Output Directory" is what broke the first deployments here.
-- [`vercel.json`](vercel.json) runs the reminder scheduler every 15 minutes. This is what satisfies PRD §11.8 — reminders fire whether or not any machine at home is awake. Set **`CRON_SECRET`**: that name is Vercel's, and it is the value Vercel signs the call with. The route accepts `ASHWINI_CRON_SECRET` too, for a self-hosted timer. Note that Vercel's Hobby plan caps cron at once per day and **fails the deployment** for anything more frequent, so `*/15` needs Pro.
+- [`vercel.json`](vercel.json) invokes the reminder scheduler every 15 minutes without depending on a machine at home. It does **not** deliver reminders yet: the default dispatcher records a failed attempt because no delivery channel or retry policy is connected. PRD §11.8 therefore remains open. Set **`CRON_SECRET`**: that name is Vercel's, and it is the value Vercel signs the call with. The route accepts `ASHWINI_CRON_SECRET` too, for a self-hosted timer. Note that Vercel's Hobby plan caps cron at once per day and **fails the deployment** for anything more frequent, so `*/15` needs Pro.
 
 **Private host (Mac mini).** Set `ASHWINI_TAILSCALE_USER` instead, reach it through `tailscale serve`, and bind to `127.0.0.1`. Never `tailscale funnel`. Use the **session-mode pooler, port 5432** — also the IPv4-friendly option, since Supabase direct connections are IPv6-only without the add-on. Here `pnpm build` emits a standalone server, which does **not** copy `public/` or `.next/static`:
 
@@ -95,9 +96,9 @@ The advisor is a deterministic rule pipeline behind an `Advisor` interface, so a
 
 ### Where the interface meets the advisor
 
-[`lib/checkin-adapter.ts`](lib/checkin-adapter.ts) translates a stored decision object into the view model the screens render, and it is the reason the interface cannot quietly disagree with the safety layer. Every field it produces is read off the decision; where the server established nothing, it sets nothing, so a gate is never invented to fill a slot.
+[`lib/checkin-adapter.ts`](lib/checkin-adapter.ts) translates a stored check-in decision into its response view. [`lib/record-client.ts`](lib/record-client.ts) is the client contract for Today, Plan, and unresolved decisions. Where the database returns no row, the screens render an empty state.
 
-[`lib/synthetic-scenario.ts`](lib/synthetic-scenario.ts) is now two halves and its header says which is which. Its reducer is live: it folds check-in records into the day's state and applies §4.4's absorbing rule, so a safety route-out stays visible until the record behind it is corrected. Its evaluator is not, and must not be reconnected — it classified check-ins by exact-string lookup against a fixture set, which is fine for a mockup and unusable as a safety layer.
+[`lib/synthetic-scenario.ts`](lib/synthetic-scenario.ts) is retained only as a tested historical prototype contract. No production component imports it. It must not be reconnected: it classified exact fixture strings and is not a safety layer.
 
 ## Boundaries the code enforces
 
@@ -107,6 +108,7 @@ The advisor is a deterministic rule pipeline behind an `Advisor` interface, so a
 - No conclusion from a confounded or incomplete data window.
 - Access to the record is gated by a verified session on an explicit allowlist, never by network position. Without it on a public host the API is refused outright, and the interface is served only while there is provably no record behind it. Storage and hosting are both disclosed managed processors — see [`docs/PRIVACY.md`](docs/PRIVACY.md) and PRD §4.8.
 - Therapy content is not an inference source: the mention is recorded, the text is not.
+- Crisis wording is discarded before persistence; only the route event and time remain.
 - A nutrition image estimate is an educated range, never a precise nutrient fact. `meals` has no scalar `kcal` column, only `kcal_low` and `kcal_high`.
 - A body or skin photo can document visible change under a protocol; it cannot establish internal body composition, diagnose a condition, or determine whether a body is "better."
 

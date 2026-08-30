@@ -11,13 +11,13 @@ records are not, and must never be committed to it.
 
 ## What is stored, and where
 
-| | |
-|---|---|
-| **Application** | Vercel (managed hosting), publicly reachable |
-| **Canonical records** | Supabase (managed Postgres), `ashwini` schema |
-| **Capture images and documents** | Supabase Storage, private buckets |
-| **Access** | A verified session on an explicit allowlist |
-| **Scheduled work** | Vercel Cron |
+|                                  |                                               |
+| -------------------------------- | --------------------------------------------- |
+| **Application**                  | Vercel (managed hosting), publicly reachable  |
+| **Canonical records**            | Supabase (managed Postgres), `ashwini` schema |
+| **Capture images and documents** | Supabase Storage, private buckets             |
+| **Access**                       | A verified session on an explicit allowlist   |
+| **Scheduled work**               | Vercel Cron                                   |
 
 Two amendments moved this away from the PRD's original topology: v0.5 moved
 canonical data off the Mac mini, and v0.6 moved the application itself onto
@@ -48,10 +48,11 @@ behind them:
 2. **Allowlist.** A verified session is not enough. The address must appear in
    `ASHWINI_ALLOWED_EMAILS`, because any account able to sign in to the same
    Supabase project would otherwise be admitted. The allowlist is what makes
-   this single-subject, and the app treats an empty one as "no auth configured"
-   rather than "allow everyone".
+   this single-subject. Until rows carry tenant ownership, the application
+   requires exactly one distinct address and fails closed on either zero or
+   multiple addresses.
 
-   *On a private deployment* these two are replaced by the tailnet identity
+   _On a private deployment_ these two are replaced by the tailnet identity
    header, which is sound **only** because `tailscale serve` injects it and
    nothing else can reach the port. The application refuses that mode on a
    public host, with no override.
@@ -59,9 +60,12 @@ behind them:
 3. **Database.** Health tables live in the `ashwini` schema, not `public`.
    Supabase serves `public` over PostgREST at a public URL, so schema isolation
    is a real control and not tidiness. The schema must **not** be added to the
-   project's Exposed Schemas. Row-level security is enabled and forced on every
-   table with no permissive policies, so even a misconfiguration there yields
-   nothing to the publishable key or its legacy anon-key equivalent.
+   project's Exposed Schemas. Row-level security is enabled with no permissive
+   policies, so the publishable key or its legacy anon-key equivalent cannot
+   read these tables through PostgREST. It is deliberately **not forced**:
+   Ashwini's server-only database-owner connection must be able to operate the
+   single-owner record after the application authenticates and allowlists the
+   request. That server credential therefore remains a high-trust boundary.
 
 ## Encryption
 
@@ -69,15 +73,17 @@ behind them:
   a private deployment) and TLS to Supabase. Certificate verification is never
   disabled.
 - **At rest:** Supabase-managed encryption for database and storage.
-- **Backups:** encrypted at rest on the backup volume (see below).
+- **Backups:** Supabase-managed encryption applies to managed backups. An
+  independently controlled backup has not been verified yet.
 - **Device:** FileVault on the Mac mini.
 
 ## Backup, retention, and deletion
 
 - Supabase provides managed backups; point-in-time recovery depends on plan
   tier and should be confirmed against the project's actual settings.
-- **An independent `pg_dump` runs on a schedule to an encrypted local volume.**
-  Managed backups you cannot restore yourself are not a record you own.
+- **An independent `pg_dump` to an encrypted local volume is required but not
+  verified as running.** Managed backups you cannot restore yourself are not a
+  record you own.
 - **The restore must be rehearsed, not assumed.** A backup that has never been
   restored is a hypothesis.
 - Retention: records are kept indefinitely by default. This is a single-subject
@@ -115,8 +121,11 @@ is what keeps rule-era records from being silently reinterpreted by a model.
 
 ## Offline data handling
 
-- Writes queued offline carry a client-generated `idempotency_key`, unique in
-  the database, so a replayed write lands exactly once.
+- There is no general offline queue yet. For an uncertain browser write, the
+  client retains only a SHA-256 intent fingerprint and its idempotency key in
+  session storage. An unchanged retry—also after reload—reuses that key, while
+  the database uniqueness constraint makes the replay land once. The check-in
+  wording itself is not written to browser storage.
 - `captured_at` (when the user recorded it) is stored separately from `ts` (when
   the server received it). A late-arriving record must re-run the confound gate
   rather than inherit a verdict computed without it.
@@ -125,10 +134,19 @@ is what keeps rule-era records from being silently reinterpreted by a model.
 
 ## What is excluded from inference
 
-- **Therapy content** (PRD §11.9). `ashwini.therapy_mentions` records that a
-  session occurred and has no column capable of holding its text. The `sources`
-  table carries a `Therapy notes` row marked `excluded`, so the exclusion is a
-  database fact rather than a comment.
+- **Therapy content** (PRD §11.9). Classification happens before persistence.
+  `ashwini.messages` receives only “Therapy session mentioned · content not
+  retained”, while `ashwini.therapy_mentions` records that a session occurred
+  and has no column capable of holding its text. The `sources` table carries a
+  `Therapy notes` row marked `excluded`, so the exclusion is a database fact
+  rather than a comment.
+- **Crisis wording.** Classification likewise happens before persistence;
+  `ashwini.messages` retains only “Crisis check-in received · content not
+  retained”. The route and timestamp remain, not the wording.
+- **Protected replay identity.** Exact retry matching uses a SHA-256 HMAC with
+  `ASHWINI_INPUT_HMAC_KEY`, which is server-only and absent from the database.
+  A plain content hash is not used because common protected phrases would be
+  guessable from a database snapshot.
 - **Skin marks** (PRD §11.4). Moles, lesions, and pigmented spots are documented
   and routed to dermatology, never analysed. `dermatology_handoffs` holds the
   user's own wording and deliberately has no assessment field.
@@ -136,20 +154,20 @@ is what keeps rule-era records from being silently reinterpreted by a model.
 ## Time-critical reminders
 
 PRD §11.8 requires that critical dose reminders not depend on a single machine.
-Hosted deployment answers this directly: Vercel Cron fires the scheduler
-regardless of whether the Mac mini is awake or the tailnet is reachable. This
-was the main thing the private-only topology could not deliver, and it is a
-large part of why v0.6 accepted public hosting.
+Vercel Cron removes that dependency from the scheduler tick, but the current
+application has no delivery channel. It records a failed placeholder attempt;
+it does not send a reminder. Hosted scheduling is a prerequisite, not proof
+that §11.8 is satisfied.
 
 Reminder metadata — that a dose is due, and which medication — reaches the
 delivery channel by necessity. Choosing that channel is choosing another
 processor, and it belongs in this document once one is wired.
 
-Two properties hold regardless of channel:
+Two properties hold in the current placeholder:
 
-- A dose already taken, skipped, or reminded about is never reminded again, and
-  the `(dose_id, scheduled_for)` unique constraint enforces that rather than
-  application care.
+- A dose already taken, skipped, or attempted is not selected again. Failed
+  attempts are not retried; a real channel needs an explicit retry and
+  idempotency design before delivery can be called reliable.
 - An undelivered reminder is recorded as failed, never as sent. A delivery that
   did not happen must not read as one.
 
@@ -157,13 +175,15 @@ Two properties hold regardless of channel:
 
 Honest gaps, not oversights:
 
-1. **Key recovery.** Encryption at rest is the processor's; there is no
+1. **Independent backup.** The required encrypted `pg_dump` schedule has not
+   been verified as running.
+2. **Key recovery.** Encryption at rest is the processor's; there is no
    documented recovery path for the independent backup volume's key.
-2. **Capture-image lifecycle.** Signed-URL expiry, retention, and deletion for
+3. **Capture-image lifecycle.** Signed-URL expiry, retention, and deletion for
    Supabase Storage objects are not yet specified.
-3. **Restore rehearsal.** Not yet performed. Until it is, the backup story is
+4. **Restore rehearsal.** Not yet performed. Until it is, the backup story is
    theoretical.
-4. **Reminder delivery channel.** The scheduler runs and the dispatch log is
+5. **Reminder delivery channel.** The scheduler runs and the dispatch log is
    append-only, but no channel is wired yet. The placeholder records
    `status: "failed"` rather than `"sent"`, so an undelivered reminder is
    visible rather than silently marked delivered.

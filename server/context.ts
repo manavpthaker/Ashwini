@@ -1,6 +1,6 @@
 import "server-only";
 import type { Clock } from "@/domain/clock";
-import { localDay } from "@/domain/clock";
+import { dayWindow } from "@/domain/clock";
 import type { Domain } from "@/domain/domains";
 import type { ConfoundDefinition, ConfoundEvaluation } from "@/domain/gate";
 import type { SubjectContext } from "@/domain/advisor";
@@ -15,7 +15,7 @@ import { db } from "./db/client";
  */
 export async function buildSubjectContext(clock: Clock): Promise<SubjectContext> {
   const now = clock.now();
-  const day = localDay(clock, now);
+  const window = dayWindow(clock, now);
   const kysely = db();
 
   const [
@@ -66,20 +66,33 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
     kysely
       .selectFrom("ashwini.confound_evaluations")
       .select(["confound_id", "state", "detail"])
+      .distinctOn("confound_id")
       .where("subject_kind", "=", "window")
-      .where("evaluated_ts", ">=", startOfDay(day))
+      .where("evaluated_ts", ">=", window.start)
+      .where("evaluated_ts", "<", window.end)
+      .orderBy("confound_id", "asc")
+      .orderBy("evaluated_ts", "desc")
+      .orderBy("eval_id", "desc")
       .execute(),
 
     kysely
-      .selectFrom("ashwini.meals")
-      .select(["kind", "ts"])
-      .where("ts", ">=", startOfDay(day))
+      .selectFrom("ashwini.meals as meal")
+      .leftJoin(
+        "ashwini.messages as source_message",
+        "source_message.message_id",
+        "meal.message_id",
+      )
+      .select(["meal.kind", "meal.ts"])
+      .where("meal.ts", ">=", window.start)
+      .where("meal.ts", "<", window.end)
+      .where("source_message.corrected_by", "is", null)
       .execute(),
 
     kysely
       .selectFrom("ashwini.commitments")
       .select(["title", "domain", "starts_at"])
       .where("starts_at", ">=", now)
+      .where("starts_at", "<", window.end)
       .orderBy("starts_at", "asc")
       .limit(10)
       .execute(),
@@ -134,10 +147,6 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
       ...(evaluation.detail === null ? {} : { detail: evaluation.detail }),
     })),
   };
-}
-
-function startOfDay(day: string): Date {
-  return new Date(`${day}T00:00:00.000Z`);
 }
 
 /**

@@ -63,6 +63,8 @@ export interface CheckinResponse {
 
 export interface CheckinRecord {
   id: string;
+  /** Canonical server timestamp; display `time` is derived from this. */
+  recordedAt?: string;
   time: string;
   originalInput: string;
   modality: "text";
@@ -76,25 +78,4 @@ export interface DerivedDayState {
   recommendedTrainingChoice: TrainingChoice;
   attention: AttentionState;
   scenarioPhase: ScenarioPhase;
-}
-
-export interface RoutineSummary {
-  id: string;
-  domain: string;
-  title: string;
-  status: EvidenceStatus;
-  progress: string;
-  behavior: string;
-  target: string;
-  nextReview: string;
-  evidence: string;
-  confounds: string;
-}
-
-export interface DayEvent {
-  time: string;
-  domain: string;
-  title: string;
-  detail: string;
-  state: "complete" | "current" | "upcoming" | "withheld" | "paused";
 }

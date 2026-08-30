@@ -19,8 +19,20 @@ export type {
   Utterance,
 } from "./types";
 
-export type { Rule, RuleContext, RuleOutcome } from "./rule";
-export { containsWord, mentionedMedications, normalize } from "./rule";
+export type { AttributedHealthClause, Rule, RuleContext, RuleOutcome } from "./rule";
+export {
+  attributedHealthClauses,
+  containsWord,
+  isOwnerHealthClause,
+  mentionedMedications,
+  normalize,
+} from "./rule";
+export {
+  classifySensitiveContent,
+  redactSensitiveContent,
+  SENSITIVE_REDACTION,
+  type SensitiveRuleId,
+} from "./sensitive-content";
 
 export {
   RULES_ADVISOR_VERSION,

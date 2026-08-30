@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fixedClock, localDay, minutesUntil, partOfDay, systemClock } from "@/domain/clock";
+import {
+  dayWindow,
+  fixedClock,
+  localDay,
+  minutesUntil,
+  partOfDay,
+  systemClock,
+} from "@/domain/clock";
 
 describe("fixedClock", () => {
   it("returns the same instant every time", () => {
@@ -86,6 +93,29 @@ describe("localDay", () => {
   it("accepts an explicit instant", () => {
     const clock = fixedClock("2025-06-27T12:18:00Z");
     expect(localDay(clock, new Date("2025-07-04T12:00:00Z"))).toBe("2025-07-04");
+  });
+});
+
+describe("dayWindow", () => {
+  it("uses configured-zone midnight rather than UTC midnight", () => {
+    const window = dayWindow(fixedClock("2025-06-27T16:00:00Z", "America/New_York"));
+    expect(window.day).toBe("2025-06-27");
+    expect(window.start.toISOString()).toBe("2025-06-27T04:00:00.000Z");
+    expect(window.end.toISOString()).toBe("2025-06-28T04:00:00.000Z");
+  });
+
+  it("honours the short daylight-saving day", () => {
+    const window = dayWindow(fixedClock("2025-03-09T16:00:00Z", "America/New_York"));
+    expect(window.start.toISOString()).toBe("2025-03-09T05:00:00.000Z");
+    expect(window.end.toISOString()).toBe("2025-03-10T04:00:00.000Z");
+    expect(window.end.getTime() - window.start.getTime()).toBe(23 * 60 * 60 * 1000);
+  });
+
+  it("honours the long daylight-saving day", () => {
+    const window = dayWindow(fixedClock("2025-11-02T17:00:00Z", "America/New_York"));
+    expect(window.start.toISOString()).toBe("2025-11-02T04:00:00.000Z");
+    expect(window.end.toISOString()).toBe("2025-11-03T05:00:00.000Z");
+    expect(window.end.getTime() - window.start.getTime()).toBe(25 * 60 * 60 * 1000);
   });
 });
 

@@ -78,17 +78,17 @@ The persistent product status communicates the overall boundary. Recommendation 
 
 Every meaningful output carries a label. A guess cannot become a fact by repeated display.
 
-| Status | Meaning | Allowed language |
-|---|---|---|
-| Recorded | A source says this occurred. | “You logged two afternoon sessions.” |
-| Unusable | Data quality or confounds prevent interpretation. | “No verdict: this window is contaminated.” |
-| Rule-based | An agreed rule applies to current facts. | “The recovery rule is active.” |
-| Noticed | A natural variation is worth retaining. | “You ate earlier than usual before this session.” |
-| Tracking | The user is deliberately repeating a small routine. | “Day 2 of the pre-training meal routine.” |
-| Early signal | A small pattern appears, with material uncertainty. | “Both comparable sessions went better; too early to call.” |
-| Consistent pattern | A relationship recurs across comparable clean windows. | “This has recurred across six comparable sessions.” |
-| Personally useful | A repeated, safe comparison supports retaining a routine. | “This routine was more reliable for the defined target.” |
-| Route out | The system must defer to a clinician, pharmacist, or dermatologist. | “Documented for a clinician handoff; Ashwini will not interpret this.” |
+| Status             | Meaning                                                             | Allowed language                                                       |
+| ------------------ | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Recorded           | A source says this occurred.                                        | “You logged two afternoon sessions.”                                   |
+| Unusable           | Data quality or confounds prevent interpretation.                   | “No verdict: this window is contaminated.”                             |
+| Rule-based         | An agreed rule applies to current facts.                            | “The recovery rule is active.”                                         |
+| Noticed            | A natural variation is worth retaining.                             | “You ate earlier than usual before this session.”                      |
+| Tracking           | The user is deliberately repeating a small routine.                 | “Day 2 of the pre-training meal routine.”                              |
+| Early signal       | A small pattern appears, with material uncertainty.                 | “Both comparable sessions went better; too early to call.”             |
+| Consistent pattern | A relationship recurs across comparable clean windows.              | “This has recurred across six comparable sessions.”                    |
+| Personally useful  | A repeated, safe comparison supports retaining a routine.           | “This routine was more reliable for the defined target.”               |
+| Route out          | The system must defer to a clinician, pharmacist, or dermatologist. | “Documented for a clinician handoff; Ashwini will not interpret this.” |
 
 ### 4.6 Daily learning is real; daily verdicts are not
 
@@ -119,12 +119,12 @@ Self-hosting the same stack on the Mac mini restores sole custody without changi
 
 - **The protection is authentication, not network position.** Earlier versions leaned on unreachability: nothing could get to the app, so what stood in front of it mattered less. That is no longer true, and a gate that was adequate behind a private network is not adequate on a public one.
 - Concretely, the previous gate read an identity header injected by `tailscale serve`. On a public host that header is supplied by the caller and proves nothing. Anything relying on network position for its trust has to be re-examined against this amendment, not grandfathered.
-- Access now requires a verified session belonging to an address on an explicit allowlist. Both halves matter: a session proves _someone_ signed in, the allowlist is what keeps this single-subject.
+- Access now requires a verified session belonging to the one address on the explicit allowlist. Both halves matter: a session proves _someone_ signed in; enforcing exactly one configured identity is what keeps the current unscoped schema single-subject. Multi-user use requires tenant-owned rows first.
 - The application refuses to start on a public host unless that authentication is configured, and there is no override for it. A private-network deployment remains fully supported and needs no change.
-- What is gained is availability. The record is reachable when the Mac mini is asleep or the tailnet is unreachable, and a hosted scheduler can fire time-critical work — which is what finally answers §11.8 without a companion device.
+- What is gained is availability. The record is reachable when the Mac mini is asleep or the tailnet is unreachable, and a hosted scheduler can invoke time-critical work. Delivery still needs a real channel and retry policy before §11.8 is satisfied.
 - What is accepted is a larger attack surface and a second processor. Both are disclosed in [`docs/PRIVACY.md`](PRIVACY.md).
 
-This is a genuine loosening of §11.3 as originally written, made deliberately in exchange for availability and reminder reliability. It is not a reinterpretation of the original intent.
+This is a genuine loosening of §11.3 as originally written, made deliberately in exchange for availability and scheduler independence. It is not a reinterpretation of the original intent, and it does not claim reminder delivery is complete.
 
 **Amendment — the record is gated, not the interface.** The amendment above was implemented as a blanket refusal: on a public host without configured authentication, every request was refused, pages included. That was one rule too coarse. It made the deployed interface impossible to look at before a database existed, which is not a privacy property — it is a deployment that cannot be inspected.
 
@@ -148,14 +148,14 @@ The product prioritizes context over a broad content feed: show the relevant ref
 
 Ashwini must stay on the appropriate rung for the available evidence.
 
-| Level | Honest inference | Example | Product action |
-|---|---|---|---|
-| 0 | Recorded fact | “Three upper-body sessions were logged this week.” | Store; normally stay silent. |
-| 1 | Data-quality fact | “Dose adherence and travel made this comparison unreadable.” | Block a verdict. |
-| 2 | Operational inference | “You train in four hours and lunch is still missing.” | Recommend the immediate low-risk action. |
-| 3 | Working synthesis | “Short sleep plus two low-energy check-ins makes the full-volume session a poor bet today.” | Recommend an adjustment and state what would change the call. |
-| 4 | Personal comparison result | “Across repeated comparable periods, routine A supported the defined target more reliably than B.” | Recommend retaining, revising, or stopping the routine. |
-| 5 | Specialist routing | “This new or worsening symptom needs professional evaluation.” | Recommend the safest route and prepare a concise handoff. |
+| Level | Honest inference           | Example                                                                                            | Product action                                                |
+| ----- | -------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 0     | Recorded fact              | “Three upper-body sessions were logged this week.”                                                 | Store; normally stay silent.                                  |
+| 1     | Data-quality fact          | “Dose adherence and travel made this comparison unreadable.”                                       | Block a verdict.                                              |
+| 2     | Operational inference      | “You train in four hours and lunch is still missing.”                                              | Recommend the immediate low-risk action.                      |
+| 3     | Working synthesis          | “Short sleep plus two low-energy check-ins makes the full-volume session a poor bet today.”        | Recommend an adjustment and state what would change the call. |
+| 4     | Personal comparison result | “Across repeated comparable periods, routine A supported the defined target more reliably than B.” | Recommend retaining, revising, or stopping the routine.       |
+| 5     | Specialist routing         | “This new or worsening symptom needs professional evaluation.”                                     | Recommend the safest route and prepare a concise handoff.     |
 
 No Level 3 association may be presented as Level 4 causality. No Level 4 result may be generalized beyond the user, intervention, target, and observation window that produced it.
 
@@ -343,7 +343,7 @@ Graph browsing and rich historical exploration belong in rendered private notes/
 
 1. Ashwini may infer and recommend within low-risk, reversible lifestyle and performance domains; it does not diagnose or prescribe.
 2. Photos remain private except for the minimum specific paired images required for an explicitly authorized analysis.
-3. Access to the record is gated by verified identity, not by network position (amended; see §4.8). Every request that could reach personal data must carry a verified session belonging to an address on an explicit allowlist. On a publicly reachable host where that verification is not configured, the application must refuse every such request, with no override — and it must do so unconditionally, never on a check it could get wrong. Where no canonical store is configured at all, it may serve the empty interface: there is no record behind it, and the interface must say so rather than imply a connected one. Canonical storage is a named managed processor under §4.8, reached only by the application over an authenticated connection. A private-network deployment remains fully supported; where one is used, the private path is an additional layer and never a substitute for the identity check.
+3. Access to the record is gated by verified identity, not by network position (amended; see §4.8). Every request that could reach personal data must carry a verified session belonging to the single configured allowlist identity until the schema has tenant-owned rows. On a publicly reachable host where that verification is not configured, the application must refuse every such request, with no override — and it must do so unconditionally, never on a check it could get wrong. Where no canonical store is configured at all, it may serve the empty interface: there is no record behind it, and the interface must say so rather than imply a connected one. Canonical storage is a named managed processor under §4.8, reached only by the application over an authenticated connection. A private-network deployment remains fully supported; where one is used, the private path is an additional layer and never a substitute for the identity check.
 4. Moles, lesions, and pigmented spots are never analyzed.
 5. No verdict is issued for a blocked/confounded window.
 6. Prescription medication is never an experimental variable.
