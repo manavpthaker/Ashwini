@@ -48,11 +48,21 @@ ASHWINI_TEST_DATABASE_URL=postgres://…/ashwini_test pnpm test
 
 The app runs in one of two shapes, and the identity gate picks the right one from what you configure — there is no mode flag.
 
-**Vercel (the current deployment).** Requires Supabase auth: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `ASHWINI_ALLOWED_EMAILS`. The app **refuses to start** on a public host without them, and there is no override — the alternative gate reads a header that only `tailscale serve` can be trusted to set, and on a public host any caller can forge it.
+**Vercel (the current deployment).** Requires Supabase auth: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `ASHWINI_ALLOWED_EMAILS`. Without them the app **serves nothing but the empty shell**, and there is no override — the alternative gate reads a header that only `tailscale serve` can be trusted to set, and on a public host any caller can forge it.
+
+What "nothing but the shell" means, precisely, because the distinction is the whole safety argument:
+
+|                                | pages   | `/api/*` |
+| ------------------------------ | ------- | -------- |
+| Supabase auth configured       | session | session  |
+| No auth, **no** `DATABASE_URL` | served  | 403      |
+| No auth, **a** `DATABASE_URL`  | 403     | 403      |
+
+The API is refused whenever real authentication is missing, unconditionally — it is the only path to a record, so this branch does not depend on detecting a database and a missed detection cannot open a hole. Pages are the separate question: the three routes are prerendered and hold fixtures plus a "not connected" state, so with no database behind them there is nothing to protect and refusing them only made the interface impossible to look at. The moment a `DATABASE_URL` exists, pages are refused too — not because the prerendered ones became dangerous, but so a future server-rendered page cannot quietly read that database.
 
 - Use the **transaction-mode pooler, port 6543**. Each serverless invocation may be a fresh process, so pooling has to happen upstream; the pool is capped at one connection per instance.
 - `output: "standalone"` is deliberately not set on Vercel. Vercel builds its own output, and forcing standalone alongside a stale project "Output Directory" is what broke the first deployments here.
-- [`vercel.json`](vercel.json) runs the reminder scheduler every 15 minutes. This is what satisfies PRD §11.8 — reminders fire whether or not any machine at home is awake — and it needs `ASHWINI_CRON_SECRET`.
+- [`vercel.json`](vercel.json) runs the reminder scheduler every 15 minutes. This is what satisfies PRD §11.8 — reminders fire whether or not any machine at home is awake. Set **`CRON_SECRET`**: that name is Vercel's, and it is the value Vercel signs the call with. The route accepts `ASHWINI_CRON_SECRET` too, for a self-hosted timer. Note that Vercel's Hobby plan caps cron at once per day and **fails the deployment** for anything more frequent, so `*/15` needs Pro.
 
 **Private host (Mac mini).** Set `ASHWINI_TAILSCALE_USER` instead, reach it through `tailscale serve`, and bind to `127.0.0.1`. Never `tailscale funnel`. Use the **session-mode pooler, port 5432** — also the IPv4-friendly option, since Supabase direct connections are IPv6-only without the add-on. Here `pnpm build` emits a standalone server, which does **not** copy `public/` or `.next/static`:
 
@@ -61,6 +71,15 @@ cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/
 ```
 
 Migrations always use the session-mode or direct URL, never 6543.
+
+### Supabase from an agent session
+
+[`.mcp.json`](.mcp.json) registers Supabase's hosted MCP server against project `hlykstavsipzjjmwlyou`, and `skills-lock.json` pins Supabase's own reference skills. Two things worth knowing before relying on it:
+
+- **It authenticates through a browser OAuth flow in a real terminal** (`claude`, then `/mcp` → supabase → Authenticate). It cannot be authenticated from a remote or web session, and its tools are not available to one.
+- **The URL grants write access.** `features=…database…` with no `read_only=true` means an agent can execute arbitrary SQL against the project that holds the health record. Migrations are the intended path for schema change here and are immutable once applied, so appending `&read_only=true` costs nothing most days and is the safer default; drop it deliberately when a session genuinely needs to write.
+
+The installed skill trees are gitignored — `skills-lock.json` pins them by content hash, so `npx skills add supabase/agent-skills` restores exactly those versions.
 
 ## Architecture
 
@@ -86,7 +105,7 @@ The advisor is a deterministic rule pipeline behind an `Advisor` interface, so a
 - Supplement-interaction recommendations require a current authorized source result. Drug–drug and prescription-change questions route to a pharmacist or prescriber — whether or not the medications are on file, since the question is most likely to be asked before they are.
 - No mole, lesion, or pigmented-spot analysis. Capture/document and route to a dermatologist where appropriate.
 - No conclusion from a confounded or incomplete data window.
-- Access is gated by a verified session on an explicit allowlist, never by network position. The app refuses to run on a public host without it. Storage and hosting are both disclosed managed processors — see [`docs/PRIVACY.md`](docs/PRIVACY.md) and PRD §4.8.
+- Access to the record is gated by a verified session on an explicit allowlist, never by network position. Without it on a public host the API is refused outright, and the interface is served only while there is provably no record behind it. Storage and hosting are both disclosed managed processors — see [`docs/PRIVACY.md`](docs/PRIVACY.md) and PRD §4.8.
 - Therapy content is not an inference source: the mention is recorded, the text is not.
 - A nutrition image estimate is an educated range, never a precise nutrient fact. `meals` has no scalar `kcal` column, only `kcal_low` and `kcal_high`.
 - A body or skin photo can document visible change under a protocol; it cannot establish internal body composition, diagnose a condition, or determine whether a body is "better."

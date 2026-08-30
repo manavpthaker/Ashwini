@@ -19,6 +19,10 @@ import {
  *   `tailscale serve` injects. Sound only where nothing else can reach the
  *   port, so it is refused on a public host.
  *
+ * On a public host with neither configured, see `refusePublicHost`: the API is
+ * refused outright, and pages are served only while there is provably no
+ * database behind them.
+ *
  * Deliberately reads process.env rather than importing server/env.ts: the Next
  * docs warn that proxy runs separately from render code and should not rely on
  * shared modules.
@@ -47,9 +51,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const host = publicHost();
 
   if (host && !permittedOnPublicHost(config)) {
-    return deny(
-      `Ashwini refuses to serve from ${host} without real authentication. The Tailscale identity header it would otherwise trust is set by \`tailscale serve\`; on a public host any caller can forge it. Configure Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, ASHWINI_ALLOWED_EMAILS) or run it on the private host.`,
-    );
+    return refusePublicHost(request, host);
   }
 
   if (config.mode === "none") {
@@ -132,6 +134,44 @@ function tailscaleGate(
 
   if (presented.toLowerCase() !== (config.tailscaleUser as string).toLowerCase()) {
     return deny("This tailnet identity is not permitted.");
+  }
+
+  return NextResponse.next();
+}
+
+/**
+ * A public host with no real authentication configured.
+ *
+ * The API is refused unconditionally here. It is the only path to a record, and
+ * nothing about what the browser is allowed to render changes that — so this
+ * branch does not depend on detecting a database correctly, and a missed
+ * detection cannot open a hole.
+ *
+ * A page document is a different question, and the first version of this got it
+ * wrong by treating it as the same one. The three pages are prerendered: they
+ * contain fixtures and a "not connected" state, and every byte of health data
+ * they could ever show arrives from the API this function is already refusing.
+ * With no DATABASE_URL there is no record behind them at all, so refusing them
+ * protected nothing and made the interface impossible to look at.
+ *
+ * The moment a database is configured, pages are refused too. Not because the
+ * prerendered ones became dangerous, but because a future server-rendered page
+ * could read that database, and this is where that gets caught rather than in
+ * the review of whoever adds it.
+ */
+function refusePublicHost(request: NextRequest, host: string): NextResponse {
+  const configured = Boolean(process.env.DATABASE_URL);
+
+  if (configured) {
+    return deny(
+      `Ashwini refuses to serve from ${host} without real authentication. The Tailscale identity header it would otherwise trust is set by \`tailscale serve\`; on a public host any caller can forge it. Configure Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, ASHWINI_ALLOWED_EMAILS) or run it on the private host.`,
+    );
+  }
+
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    return deny(
+      "This deployment has no record connected and no authentication configured, so there is nothing for the API to answer with.",
+    );
   }
 
   return NextResponse.next();
