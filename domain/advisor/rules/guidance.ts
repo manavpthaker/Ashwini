@@ -141,7 +141,9 @@ function mealDetailsFrom(text: string): { description: string | null; hasPortion
     .split(CORRECTION_SEPARATOR)
     .map((part) => part.trim())
     .filter(Boolean);
-  const base = parts[0] ?? retained;
+  // A non-empty check-in always yields at least one split part. The rule only
+  // calls this extractor after matching an actual meal occurrence.
+  const base = parts[0]!;
   const details = parts.slice(1);
   const hasPortion = MEAL_PORTION.test(retained);
 

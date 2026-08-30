@@ -179,6 +179,16 @@ describe("first check-in delivery", () => {
     ]);
   });
 
+  it("keeps asking when an appended detail is not a training time", () => {
+    const output = respondSync(
+      advisorInput("What should I eat before training? — tomorrow", freshRecord),
+    );
+
+    expect(output.trace.ruleId).toBe("pre-training-nutrition");
+    expect(output.reply.kind).toBe("question");
+    expect(output.reply.text).toMatch(/how long until training/i);
+  });
+
   it.each([
     "I took medication 30 minutes ago. What should I eat before training?",
     "I ate lunch two hours ago. What should I eat before training?",
@@ -215,6 +225,16 @@ describe("first check-in delivery", () => {
     expect(output.reply.text).toMatch(/with training at 5 pm,/i);
     expect(output.reply.text).not.toMatch(/with at 5 pm until training/i);
     expect(output.decisions[0]?.expectedLag).toBe("Training at 5 pm");
+  });
+
+  it("accepts a direct clock time as the requested detail", () => {
+    const output = respondSync(
+      advisorInput("What should I eat before training? — at 5 pm", freshRecord),
+    );
+
+    expect(output.trace.ruleId).toBe("pre-training-nutrition");
+    expect(output.reply.kind).toBe("recommendation");
+    expect(output.reply.text).toMatch(/with training at 5 pm,/i);
   });
 
   it.each([
@@ -256,6 +276,27 @@ describe("first check-in delivery", () => {
       kind: "medication_event",
       text: "I took my morning medication; help me keep the record accurate. — lisinopril",
     });
+  });
+
+  it("handles missing and directly supplied medication identities", () => {
+    const unnamed = respondSync(advisorInput("Medication refill was picked up", freshRecord));
+    const named = respondSync(advisorInput("I took lisinopril", freshRecord));
+
+    expect(unnamed.trace.ruleId).toBe("medication");
+    expect(unnamed.reply.kind).toBe("question");
+    expect(unnamed.reply.text).toMatch(/which medication/i);
+
+    expect(named.trace.ruleId).toBe("medication");
+    expect(named.reply.kind).toBe("record");
+    expect(named.reply.text).toMatch(/lisinopril/i);
+  });
+
+  it("rejects punctuation as a medication identity", () => {
+    const output = respondSync(advisorInput("I took my morning medication — ???", freshRecord));
+
+    expect(output.trace.ruleId).toBe("medication");
+    expect(output.reply.kind).toBe("question");
+    expect(output.reply.text).toMatch(/which medication/i);
   });
 
   it("does not turn medication questions, forgotten identity, or future hypotheticals into medication events", () => {
@@ -316,6 +357,16 @@ describe("first check-in delivery", () => {
       text: "I only have 20 minutes, should I train?",
       choice: "Do a short familiar session",
       reply: /only 20 minutes available/i,
+    },
+    {
+      text: "I've got only 20 minutes, should I train?",
+      choice: "Do a short familiar session",
+      reply: /only 20 minutes available/i,
+    },
+    {
+      text: "I am short on time, should I train?",
+      choice: "Do a short familiar session",
+      reply: /limited time available/i,
     },
     {
       text: "I ate lunch, should I train? — my schedule changed",
