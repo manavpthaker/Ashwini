@@ -216,22 +216,16 @@ describeIfDb("schema invariants", () => {
       expect(Number(rows[0]?.count)).toBe(0);
     });
 
-    it("enables and forces row level security on every table", async () => {
-      const { rows } = await client.query<{ tablename: string }>(
-        `select c.relname as tablename
-         from pg_class c join pg_namespace n on n.oid = c.relnamespace
-         where n.nspname = 'ashwini' and c.relkind = 'r'
-           and not (c.relrowsecurity and c.relforcerowsecurity)`,
-      );
-      expect(rows.map((row) => row.tablename)).toEqual([]);
-    });
-
     it("grants nothing on the schema to PUBLIC", async () => {
       const { rows } = await client.query<{ has: boolean }>(
         "select has_schema_privilege('public', 'ashwini', 'USAGE') as has",
       );
       expect(rows[0]?.has).toBe(false);
     });
+
+    // RLS is asserted in its own block below. This used to require FORCE as
+    // well, which is what let the defect through: the assertion agreed with the
+    // migration, and both were wrong about who FORCE applies to.
   });
 
   describe("PRD 8 — confound thresholds are versioned data", () => {
@@ -301,6 +295,45 @@ describeIfDb("schema invariants", () => {
       // Different vocabulary, different purpose. Conflating them is the trap.
       expect(rows[0]?.labels).not.toContain("recorded");
       expect(rows[0]?.labels).toContain("hypothesized");
+    });
+  });
+
+  describe("row level security is enabled and never forced", () => {
+    /**
+     * Both halves matter and they pull in opposite directions.
+     *
+     * ENABLED is the defence-in-depth layer: if `ashwini` were ever added to the
+     * project's Exposed Schemas by accident, anon and authenticated would still
+     * get nothing, because there are no policies.
+     *
+     * FORCED would apply that same nothing to the table owner, which is the
+     * application. Measured on Postgres 16 as a non-superuser owner: FORCE makes
+     * every select return zero rows without an error, and every insert fail. A
+     * health record answering "no history" is the worst available failure.
+     */
+    it("enables RLS on every table", async () => {
+      const { rows } = await client.query<{ relname: string }>(
+        `select c.relname from pg_class c
+         join pg_namespace n on n.oid = c.relnamespace
+         where n.nspname = 'ashwini' and c.relkind = 'r' and not c.relrowsecurity`,
+      );
+      expect(rows.map((row) => row.relname)).toEqual([]);
+    });
+
+    it("forces RLS on no table", async () => {
+      const { rows } = await client.query<{ relname: string }>(
+        `select c.relname from pg_class c
+         join pg_namespace n on n.oid = c.relnamespace
+         where n.nspname = 'ashwini' and c.relkind = 'r' and c.relforcerowsecurity`,
+      );
+      expect(rows.map((row) => row.relname)).toEqual([]);
+    });
+
+    it("carries no policies, so the enabled layer denies by default", async () => {
+      const { rows } = await client.query<{ count: string }>(
+        `select count(*) from pg_policies where schemaname = 'ashwini'`,
+      );
+      expect(rows[0]?.count).toBe("0");
     });
   });
 });
