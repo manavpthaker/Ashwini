@@ -23,7 +23,22 @@ const INSECURE_SSL_VALUES = new Set([
 
 export interface PostgresConnectionConfig {
   connectionString: string;
-  ssl: false | { rejectUnauthorized: true };
+  ssl: false | { ca: string; rejectUnauthorized: true };
+}
+
+function normalizeCertificateAuthority(certificateAuthority: string | undefined): string {
+  const ca = certificateAuthority?.replaceAll("\\n", "\n").trim();
+  if (!ca) {
+    throw new Error(
+      "ASHWINI_POSTGRES_CA is required for remote PostgreSQL connections. Download the project CA from Supabase Database Settings.",
+    );
+  }
+
+  if (!ca.includes("-----BEGIN CERTIFICATE-----") || !ca.includes("-----END CERTIFICATE-----")) {
+    throw new Error("ASHWINI_POSTGRES_CA must contain a PEM-encoded certificate.");
+  }
+
+  return ca;
 }
 
 function parsePostgresUrl(connectionString: string): URL {
@@ -96,9 +111,12 @@ function isLoopbackHost(hostname: string): boolean {
 
 /**
  * Local development and CI databases use plaintext loopback connections.
- * Every other host gets public-CA and hostname verification.
+ * Every other host gets project-CA and hostname verification.
  */
-export function postgresConnectionConfig(connectionString: string): PostgresConnectionConfig {
+export function postgresConnectionConfig(
+  connectionString: string,
+  certificateAuthority?: string,
+): PostgresConnectionConfig {
   const url = parsePostgresUrl(connectionString);
   rejectInsecureTlsOptions(url);
 
@@ -114,6 +132,11 @@ export function postgresConnectionConfig(connectionString: string): PostgresConn
 
   return {
     connectionString: url.toString(),
-    ssl: local ? false : { rejectUnauthorized: true },
+    ssl: local
+      ? false
+      : {
+          ca: normalizeCertificateAuthority(certificateAuthority),
+          rejectUnauthorized: true,
+        },
   };
 }

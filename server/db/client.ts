@@ -34,7 +34,7 @@ function isServerless(): boolean {
 export function db(): Kysely<Database> {
   if (instance) return instance;
 
-  const { DATABASE_URL } = env();
+  const { ASHWINI_POSTGRES_CA, DATABASE_URL } = env();
   if (!DATABASE_URL) {
     throw new Error(
       "DATABASE_URL is not set. The app cannot read or write health records without it.",
@@ -44,7 +44,7 @@ export function db(): Kysely<Database> {
   instance = new Kysely<Database>({
     dialect: new PostgresDialect({
       pool: new Pool({
-        ...postgresConnectionConfig(DATABASE_URL),
+        ...postgresConnectionConfig(DATABASE_URL, ASHWINI_POSTGRES_CA),
         // One connection per serverless instance; a small pool on a real process.
         max: isServerless() ? 1 : 5,
         idleTimeoutMillis: isServerless() ? 10_000 : 30_000,

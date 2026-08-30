@@ -24,6 +24,7 @@ const MANAGED_KEYS = [
   "NODE_ENV",
   "DATABASE_URL",
   "ASHWINI_INPUT_HMAC_KEY",
+  "ASHWINI_POSTGRES_CA",
   "ASHWINI_TAILSCALE_USER",
   "ASHWINI_REQUIRE_IDENTITY",
   "NEXT_PUBLIC_SUPABASE_URL",
@@ -49,6 +50,13 @@ function useSupabaseAuth(): void {
 
 function useInputHmacKey(): void {
   setEnv("ASHWINI_INPUT_HMAC_KEY", "test-only-replay-pepper-0000000000");
+}
+
+function usePostgresCa(): void {
+  setEnv(
+    "ASHWINI_POSTGRES_CA",
+    "-----BEGIN CERTIFICATE-----\ntest-only-ca\n-----END CERTIFICATE-----",
+  );
 }
 
 function request(path = "/api/decisions", headers: Record<string, string> = {}) {
@@ -308,6 +316,7 @@ describe("env at boot", () => {
     setEnv("VERCEL", "1");
     setEnv("DATABASE_URL", "postgres://user:pw@example.test:6543/db");
     useInputHmacKey();
+    usePostgresCa();
     useSupabaseAuth();
     expect(() => env()).not.toThrow();
   });
@@ -325,6 +334,23 @@ describe("env at boot", () => {
   it("boots on a private host with the Tailscale gate", () => {
     setEnv("NODE_ENV", "production");
     setEnv("DATABASE_URL", "postgres://user:pw@example.test:5432/db");
+    useInputHmacKey();
+    usePostgresCa();
+    setEnv("ASHWINI_TAILSCALE_USER", "owner@example.com");
+    expect(() => env()).not.toThrow();
+  });
+
+  it("refuses a remote production database without the project CA", () => {
+    setEnv("NODE_ENV", "production");
+    setEnv("DATABASE_URL", "postgres://user:pw@example.test:5432/db");
+    useInputHmacKey();
+    setEnv("ASHWINI_TAILSCALE_USER", "owner@example.com");
+    expect(() => env()).toThrow(/ASHWINI_POSTGRES_CA is required/);
+  });
+
+  it("keeps a loopback production database CA-free", () => {
+    setEnv("NODE_ENV", "production");
+    setEnv("DATABASE_URL", "postgres://user:pw@localhost:5432/db");
     useInputHmacKey();
     setEnv("ASHWINI_TAILSCALE_USER", "owner@example.com");
     expect(() => env()).not.toThrow();

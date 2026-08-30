@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { postgresConnectionConfig } from "@/lib/postgres-connection";
 
+const TEST_CA = [
+  "-----BEGIN CERTIFICATE-----",
+  "test-only-ca-not-a-real-certificate",
+  "-----END CERTIFICATE-----",
+].join("\n");
+
 describe("PostgreSQL connection transport", () => {
   it.each([
     "postgres://user:password@localhost:5432/ashwini",
@@ -17,8 +23,26 @@ describe("PostgreSQL connection transport", () => {
     expect(
       postgresConnectionConfig(
         "postgres://user:password@db.hlykstavsipzjjmwlyou.supabase.co:5432/postgres",
+        TEST_CA,
       ).ssl,
-    ).toEqual({ rejectUnauthorized: true });
+    ).toEqual({ ca: TEST_CA, rejectUnauthorized: true });
+  });
+
+  it("fails closed when a remote host has no project CA", () => {
+    expect(() =>
+      postgresConnectionConfig(
+        "postgres://user:password@db.hlykstavsipzjjmwlyou.supabase.co:5432/postgres",
+      ),
+    ).toThrow(/ASHWINI_POSTGRES_CA is required/);
+  });
+
+  it("rejects a malformed project CA", () => {
+    expect(() =>
+      postgresConnectionConfig(
+        "postgres://user:password@db.hlykstavsipzjjmwlyou.supabase.co:5432/postgres",
+        "not a PEM certificate",
+      ),
+    ).toThrow(/PEM-encoded certificate/);
   });
 
   it.each(["require", "verify-ca", "verify-full"])(
@@ -26,9 +50,10 @@ describe("PostgreSQL connection transport", () => {
     (mode) => {
       const config = postgresConnectionConfig(
         `postgres://user:password@remote.example.test:5432/postgres?sslmode=${mode}`,
+        TEST_CA,
       );
 
-      expect(config.ssl).toEqual({ rejectUnauthorized: true });
+      expect(config.ssl).toEqual({ ca: TEST_CA, rejectUnauthorized: true });
       expect(new URL(config.connectionString).searchParams.get("sslmode")).toBeNull();
     },
   );
@@ -37,13 +62,15 @@ describe("PostgreSQL connection transport", () => {
     expect(
       postgresConnectionConfig(
         "postgres://user:password@localhost:5432/postgres?host=remote.example.test",
+        TEST_CA,
       ).ssl,
-    ).toEqual({ rejectUnauthorized: true });
+    ).toEqual({ ca: TEST_CA, rejectUnauthorized: true });
   });
 
   it("removes every node-postgres TLS override while preserving unrelated options", () => {
     const config = postgresConnectionConfig(
       "postgres://user:password@remote.example.test:5432/postgres?sslmode=verify-full&ssl=true&sslcert=%2Ftmp%2Fclient.crt&sslkey=%2Ftmp%2Fclient.key&sslrootcert=%2Ftmp%2Froot.crt&application_name=ashwini",
+      TEST_CA,
     );
     const sanitized = new URL(config.connectionString);
 
@@ -57,7 +84,10 @@ describe("PostgreSQL connection transport", () => {
     // This construction would read the certificate paths and replace the
     // explicit SSL object if any of the stripped options still reached pg.
     const client = new Client(config);
-    expect((client as unknown as { ssl: unknown }).ssl).toEqual({ rejectUnauthorized: true });
+    expect((client as unknown as { ssl: unknown }).ssl).toEqual({
+      ca: TEST_CA,
+      rejectUnauthorized: true,
+    });
   });
 
   it.each(["disable", "allow", "prefer", "no-verify"])("refuses insecure sslmode=%s", (mode) => {

@@ -30,7 +30,9 @@ async function main(): Promise<void> {
     throw new Error(`No migrations found in ${MIGRATIONS_DIR}`);
   }
 
-  const client = new Client(postgresConnectionConfig(connectionString));
+  const client = new Client(
+    postgresConnectionConfig(connectionString, process.env.ASHWINI_POSTGRES_CA),
+  );
   await client.connect();
 
   try {

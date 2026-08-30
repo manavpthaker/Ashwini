@@ -70,8 +70,9 @@ behind them:
 ## Encryption
 
 - **In transit:** TLS to the application (Vercel-managed, or Tailscale-issued on
-  a private deployment) and TLS to Supabase. Certificate verification is never
-  disabled.
+  a private deployment) and TLS to Supabase. Remote PostgreSQL connections
+  verify both the hostname and the chain against the project CA supplied in the
+  server-only `ASHWINI_POSTGRES_CA`; missing CA configuration fails closed.
 - **At rest:** Supabase-managed encryption for database and storage.
 - **Backups:** Supabase-managed encryption applies to managed backups. An
   independently controlled backup has not been verified yet.

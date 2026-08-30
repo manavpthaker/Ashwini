@@ -26,7 +26,9 @@ async function main(): Promise<void> {
     throw new Error("Set ASHWINI_ALLOW_SEED=1 to confirm you mean to write synthetic records.");
   }
 
-  const client = new Client(postgresConnectionConfig(connectionString));
+  const client = new Client(
+    postgresConnectionConfig(connectionString, process.env.ASHWINI_POSTGRES_CA),
+  );
   await client.connect();
 
   try {

@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { permittedOnPublicHost, publicHost, readAuthConfig } from "@/lib/auth/config";
+import { postgresConnectionConfig } from "@/lib/postgres-connection";
 
 /**
  * Environment, validated once at boot.
@@ -28,6 +29,12 @@ const schema = z.object({
    * is meant for serverless, not a long-lived Node process.
    */
   DATABASE_URL: z.string().url().optional(),
+
+  /**
+   * Supabase project CA in PEM form. It is passed only to node-postgres and is
+   * required for every non-loopback database connection.
+   */
+  ASHWINI_POSTGRES_CA: z.string().trim().min(1).optional(),
 
   /**
    * The zone all server-side day boundaries are resolved in.
@@ -124,6 +131,10 @@ export function env(): Env {
         "ASHWINI_INPUT_HMAC_KEY is required in production so protected replay fingerprints cannot be guessed from the database.",
       );
     }
+
+    // Validate the complete transport policy at boot. Loopback development
+    // remains CA-free; every remote database must carry the project CA.
+    postgresConnectionConfig(value.DATABASE_URL, value.ASHWINI_POSTGRES_CA);
   }
 
   cached = value;
