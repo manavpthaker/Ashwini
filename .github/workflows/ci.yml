@@ -47,17 +47,23 @@ jobs:
       # A public repo plus a NEXT_PUBLIC_* convention is one typo away from
       # shipping a credential to the browser. Fail the build instead.
       #
-      # NEXT_PUBLIC_SUPABASE_ANON_KEY is the one permitted exception: the anon
-      # key is designed to be public, identifies the project, and carries no
-      # privileges of its own — row-level security is what protects the data.
-      # Anything else matching this pattern is a mistake.
+      # Supabase publishable keys (and the legacy anon equivalent) are the
+      # permitted exceptions: they are designed to be public and carry no
+      # elevated privileges. Row-level security protects the data. Anything
+      # else matching this pattern is a mistake.
       - name: Guard against client-exposed secrets
         run: |
-          if grep -rnE 'NEXT_PUBLIC_[A-Z_]*(KEY|SECRET|TOKEN|PASSWORD|DATABASE|CREDENTIAL)' \
-               --include='*.ts' --include='*.tsx' --include='*.mjs' --include='*.cjs' \
-               --include='*.yml' --include='.env.example' . \
-             | grep -v 'NEXT_PUBLIC_SUPABASE_ANON_KEY' ; then
-            echo "::error::A NEXT_PUBLIC_ variable names a credential. Anything NEXT_PUBLIC_ is compiled into the browser bundle."
+          ashwini_forbidden_public_vars="$(
+            grep -rhoE 'NEXT_PUBLIC_[A-Z_]*(KEY|SECRET|TOKEN|PASSWORD|DATABASE|CREDENTIAL)' \
+              --include='*.ts' --include='*.tsx' --include='*.mjs' --include='*.cjs' \
+              --include='*.yml' --include='.env.example' . \
+              | sort -u \
+              | grep -Ev '^NEXT_PUBLIC_SUPABASE_(PUBLISHABLE|ANON)_KEY$' \
+              || true
+          )"
+          if [ -n "$ashwini_forbidden_public_vars" ]; then
+            printf '%s\n' "$ashwini_forbidden_public_vars"
+            printf '%s\n' "::error::A NEXT_PUBLIC_ variable names a credential. Anything NEXT_PUBLIC_ is compiled into the browser bundle."
             exit 1
           fi
 

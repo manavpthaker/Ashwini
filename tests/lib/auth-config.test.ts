@@ -16,13 +16,52 @@ import {
 
 const SUPABASE = {
   NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-key",
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
   ASHWINI_ALLOWED_EMAILS: "owner@example.com",
 };
 
 describe("mode selection", () => {
   it("is supabase when url, key and an allowlist are all present", () => {
     expect(readAuthConfig(SUPABASE).mode).toBe("supabase");
+  });
+
+  it("accepts the legacy anon-key variable as a fallback", () => {
+    const config = readAuthConfig({
+      NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "legacy-anon-key",
+      ASHWINI_ALLOWED_EMAILS: "owner@example.com",
+    });
+    expect(config.mode).toBe("supabase");
+    expect(config.supabasePublishableKey).toBe("legacy-anon-key");
+  });
+
+  it("prefers the modern publishable-key variable when both are present", () => {
+    const config = readAuthConfig({
+      ...SUPABASE,
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "legacy-anon-key",
+    });
+    expect(config.supabasePublishableKey).toBe("sb_publishable_test");
+  });
+
+  it("falls back to the legacy key when the modern variable is blank", () => {
+    const config = readAuthConfig({
+      NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "   ",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "legacy-anon-key",
+      ASHWINI_ALLOWED_EMAILS: "owner@example.com",
+    });
+    expect(config.mode).toBe("supabase");
+    expect(config.supabasePublishableKey).toBe("legacy-anon-key");
+  });
+
+  it("rejects an obvious Supabase secret key in a public variable", () => {
+    const config = readAuthConfig({
+      NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_secret_do_not_expose",
+      ASHWINI_ALLOWED_EMAILS: "owner@example.com",
+    });
+    expect(config.mode).toBe("none");
+    expect(config.supabasePublishableKey).toBeNull();
   });
 
   it("falls back to tailscale when Supabase is not fully configured", () => {
@@ -42,7 +81,7 @@ describe("mode selection", () => {
     // up to that Supabase project. Single-subject means the list is required.
     const config = readAuthConfig({
       NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-key",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
     });
     expect(config.mode).toBe("none");
   });
@@ -50,7 +89,7 @@ describe("mode selection", () => {
   it("ignores blank and whitespace-only values", () => {
     const config = readAuthConfig({
       NEXT_PUBLIC_SUPABASE_URL: "   ",
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-key",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
       ASHWINI_ALLOWED_EMAILS: " , ,",
       ASHWINI_TAILSCALE_USER: "  ",
     });

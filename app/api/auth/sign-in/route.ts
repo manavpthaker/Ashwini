@@ -60,7 +60,7 @@ export async function POST(request: Request): Promise<Response> {
   const cookieStore = await cookies();
   const supabase = createServerClient(
     config.supabaseUrl as string,
-    config.supabaseAnonKey as string,
+    config.supabasePublishableKey as string,
     {
       cookies: {
         getAll: () => cookieStore.getAll(),

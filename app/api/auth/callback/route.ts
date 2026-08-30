@@ -33,7 +33,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const supabase = createServerClient(
     config.supabaseUrl as string,
-    config.supabaseAnonKey as string,
+    config.supabasePublishableKey as string,
     {
       cookies: {
         getAll: () => cookieStore.getAll(),

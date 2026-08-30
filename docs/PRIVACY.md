@@ -61,7 +61,7 @@ behind them:
    is a real control and not tidiness. The schema must **not** be added to the
    project's Exposed Schemas. Row-level security is enabled and forced on every
    table with no permissive policies, so even a misconfiguration there yields
-   nothing to the anon key.
+   nothing to the publishable key or its legacy anon-key equivalent.
 
 ## Encryption
 

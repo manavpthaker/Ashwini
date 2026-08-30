@@ -83,7 +83,7 @@ async function supabaseGate(
 
   const supabase = createServerClient(
     config.supabaseUrl as string,
-    config.supabaseAnonKey as string,
+    config.supabasePublishableKey as string,
     {
       cookies: {
         getAll: () => request.cookies.getAll(),
@@ -164,7 +164,7 @@ function refusePublicHost(request: NextRequest, host: string): NextResponse {
 
   if (configured) {
     return deny(
-      `Ashwini refuses to serve from ${host} without real authentication. The Tailscale identity header it would otherwise trust is set by \`tailscale serve\`; on a public host any caller can forge it. Configure Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, ASHWINI_ALLOWED_EMAILS) or run it on the private host.`,
+      `Ashwini refuses to serve from ${host} without real authentication. The Tailscale identity header it would otherwise trust is set by \`tailscale serve\`; on a public host any caller can forge it. Configure Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, ASHWINI_ALLOWED_EMAILS) or run it on the private host.`,
     );
   }
 

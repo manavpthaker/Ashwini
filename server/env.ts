@@ -88,7 +88,7 @@ export function env(): Env {
 
     if (auth.mode === "none") {
       throw new Error(
-        "No authentication is configured. Set Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, ASHWINI_ALLOWED_EMAILS), or ASHWINI_TAILSCALE_USER behind `tailscale serve`.",
+        "No authentication is configured. Set Supabase auth (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, ASHWINI_ALLOWED_EMAILS), or ASHWINI_TAILSCALE_USER behind `tailscale serve`.",
       );
     }
 

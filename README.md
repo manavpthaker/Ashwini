@@ -48,7 +48,7 @@ ASHWINI_TEST_DATABASE_URL=postgres://…/ashwini_test pnpm test
 
 The app runs in one of two shapes, and the identity gate picks the right one from what you configure — there is no mode flag.
 
-**Vercel (the current deployment).** Requires Supabase auth: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `ASHWINI_ALLOWED_EMAILS`. Without them the app **serves nothing but the empty shell**, and there is no override — the alternative gate reads a header that only `tailscale serve` can be trusted to set, and on a public host any caller can forge it.
+**Vercel (the current deployment).** Requires Supabase auth: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `ASHWINI_ALLOWED_EMAILS`. The legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` name remains accepted as a fallback. Without a complete configuration the app **serves nothing but the empty shell**, and there is no override — the alternative gate reads a header that only `tailscale serve` can be trusted to set, and on a public host any caller can forge it.
 
 What "nothing but the shell" means, precisely, because the distinction is the whole safety argument:
 

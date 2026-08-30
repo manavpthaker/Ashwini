@@ -26,6 +26,7 @@ const MANAGED_KEYS = [
   "ASHWINI_TAILSCALE_USER",
   "ASHWINI_REQUIRE_IDENTITY",
   "NEXT_PUBLIC_SUPABASE_URL",
+  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "ASHWINI_ALLOWED_EMAILS",
 ] as const;
@@ -41,7 +42,7 @@ function setEnv(key: string, value: string | undefined): void {
 
 function useSupabaseAuth(): void {
   setEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
-  setEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-key");
+  setEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test");
   setEnv("ASHWINI_ALLOWED_EMAILS", "owner@example.com");
 }
 
@@ -156,6 +157,21 @@ describe("a public host", () => {
   it("permits a verified Supabase session on Vercel", async () => {
     setEnv("VERCEL", "1");
     useSupabaseAuth();
+    getUser.mockResolvedValue({
+      data: { user: { id: "u1", email: "owner@example.com" } },
+      error: null,
+    });
+
+    const response = await proxy(request());
+    expect(response.status).toBe(200);
+    expect(getUser).toHaveBeenCalled();
+  });
+
+  it("continues to permit the legacy anon-key variable on Vercel", async () => {
+    setEnv("VERCEL", "1");
+    setEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
+    setEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "legacy-anon-key");
+    setEnv("ASHWINI_ALLOWED_EMAILS", "owner@example.com");
     getUser.mockResolvedValue({
       data: { user: { id: "u1", email: "owner@example.com" } },
       error: null,

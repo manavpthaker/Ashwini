@@ -27,11 +27,11 @@ export interface AuthConfig {
   readonly mode: AuthMode;
   readonly supabaseUrl: string | null;
   /**
-   * The anon key is designed to be public — it identifies the project and
-   * carries no privileges of its own; row-level security is what protects data.
-   * It is the one NEXT_PUBLIC_*_KEY this repo permits, and CI allows it by name.
+   * The publishable key identifies the project and carries no elevated
+   * privileges; row-level security is what protects data. The legacy anon-key
+   * variable remains a fallback while existing deployments migrate.
    */
-  readonly supabaseAnonKey: string | null;
+  readonly supabasePublishableKey: string | null;
   /** Addresses permitted to hold a session. Normally exactly one. */
   readonly allowedEmails: readonly string[];
   readonly tailscaleUser: string | null;
@@ -39,19 +39,27 @@ export interface AuthConfig {
 
 export function readAuthConfig(source: EnvSource = process.env): AuthConfig {
   const supabaseUrl = source.NEXT_PUBLIC_SUPABASE_URL?.trim() || null;
-  const supabaseAnonKey = source.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || null;
+  const configuredSupabaseKey =
+    source.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+    source.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+    null;
+  // A Supabase secret key bypasses RLS and must never be accepted through a
+  // NEXT_PUBLIC_ variable. Fail closed on the recognisable modern prefix.
+  const supabasePublishableKey = configuredSupabaseKey?.startsWith("sb_secret_")
+    ? null
+    : configuredSupabaseKey;
   const allowedEmails = (source.ASHWINI_ALLOWED_EMAILS ?? "")
     .split(",")
     .map((entry) => entry.trim().toLowerCase())
     .filter(Boolean);
   const tailscaleUser = source.ASHWINI_TAILSCALE_USER?.trim() || null;
 
-  const supabaseReady = Boolean(supabaseUrl && supabaseAnonKey && allowedEmails.length > 0);
+  const supabaseReady = Boolean(supabaseUrl && supabasePublishableKey && allowedEmails.length > 0);
 
   return {
     mode: supabaseReady ? "supabase" : tailscaleUser ? "tailscale" : "none",
     supabaseUrl,
-    supabaseAnonKey,
+    supabasePublishableKey,
     allowedEmails,
     tailscaleUser,
   };

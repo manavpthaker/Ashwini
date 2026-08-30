@@ -19,7 +19,7 @@ export async function POST(): Promise<Response> {
 
   const supabase = createServerClient(
     config.supabaseUrl as string,
-    config.supabaseAnonKey as string,
+    config.supabasePublishableKey as string,
     {
       cookies: {
         getAll: () => cookieStore.getAll(),

@@ -30,7 +30,7 @@ export async function currentSession(): Promise<Session | null> {
 
   const supabase = createServerClient(
     config.supabaseUrl as string,
-    config.supabaseAnonKey as string,
+    config.supabasePublishableKey as string,
     {
       cookies: {
         getAll: () => cookieStore.getAll(),
