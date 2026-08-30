@@ -139,9 +139,9 @@ describeIfDb("conversation round trip", () => {
     expect(result.output.trace.ruleId).toBe("drug-drug");
     expect(result.output.route).toBe("pharmacist");
     expect(result.output.decisions[0]?.evidenceStatus).toBe("route_out");
-    // The record is kept in the protected medication lane, never as an
-    // experimental variable (PRD 11.6).
-    expect(result.output.records[0]?.kind).toBe("medication_event");
+    // A question is not an adherence event. Persist only the route fact so a
+    // reload retains the safety boundary without inventing medication use.
+    expect(result.output.records[0]?.kind).toBe("context_note");
   });
 
   it("records every kind it reports, including the ones with no table", async () => {
@@ -149,13 +149,13 @@ describeIfDb("conversation round trip", () => {
     // because a kind with no dedicated table wrote no routed_records row. What
     // Ashwini says it recorded has to still be there after a refresh.
     const result = await handleUtterance({ text: "can i take lisinopril with ibuprofen" });
-    expect(result.output.records.map((record) => record.kind)).toEqual(["medication_event"]);
+    expect(result.output.records.map((record) => record.kind)).toEqual(["context_note"]);
 
     const { rows } = await client.query<{ record_kind: string; record_table: string }>(
       "select record_kind, record_table from ashwini.routed_records where message_id = $1",
       [result.userMessageId],
     );
-    expect(rows).toEqual([{ record_kind: "medication_event", record_table: "messages" }]);
+    expect(rows).toEqual([{ record_kind: "context_note", record_table: "messages" }]);
   });
 
   it("discards therapy content before it reaches the message table", async () => {

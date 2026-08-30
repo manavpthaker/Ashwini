@@ -289,7 +289,7 @@ describeIfDb("record-backed product surfaces", () => {
        (name, domain, status, behavior, target, expected_lag)
        values
          ($1, 'nutrition', 'active', 'First behavior', 'First target', '7 days'),
-         ($2, 'recovery', 'active', 'Second behavior', 'Second target', '7 days')
+         ($2, 'training', 'active', 'Second behavior', 'Second target', '7 days')
        returning routine_id, name`,
       [firstName, secondName],
     );
