@@ -62,7 +62,7 @@ The API is refused whenever real authentication is missing, unconditionally — 
 
 - Use the **transaction-mode pooler, port 6543**. Each serverless invocation may be a fresh process, so pooling has to happen upstream; the pool is capped at one connection per instance.
 - `output: "standalone"` is deliberately not set on Vercel. Vercel builds its own output, and forcing standalone alongside a stale project "Output Directory" is what broke the first deployments here.
-- [`vercel.json`](vercel.json) runs the reminder scheduler every 15 minutes. This is what satisfies PRD §11.8 — reminders fire whether or not any machine at home is awake — and it needs `ASHWINI_CRON_SECRET`.
+- [`vercel.json`](vercel.json) runs the reminder scheduler every 15 minutes. This is what satisfies PRD §11.8 — reminders fire whether or not any machine at home is awake. Set **`CRON_SECRET`**: that name is Vercel's, and it is the value Vercel signs the call with. The route accepts `ASHWINI_CRON_SECRET` too, for a self-hosted timer. Note that Vercel's Hobby plan caps cron at once per day and **fails the deployment** for anything more frequent, so `*/15` needs Pro.
 
 **Private host (Mac mini).** Set `ASHWINI_TAILSCALE_USER` instead, reach it through `tailscale serve`, and bind to `127.0.0.1`. Never `tailscale funnel`. Use the **session-mode pooler, port 5432** — also the IPv4-friendly option, since Supabase direct connections are IPv6-only without the add-on. Here `pnpm build` emits a standalone server, which does **not** copy `public/` or `.next/static`:
 

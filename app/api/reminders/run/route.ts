@@ -19,16 +19,24 @@ import { runReminders } from "@/server/reminders/run";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
-  const secret = process.env.ASHWINI_CRON_SECRET;
+  // Vercel Cron signs its calls with the project variable named exactly
+  // CRON_SECRET — that name is Vercel's, not ours. Accepting it as well as
+  // ASHWINI_CRON_SECRET is what stops the scheduler 401ing every fifteen
+  // minutes, silently, because the two names were set to different values or
+  // only one of them was set at all.
+  const secret = process.env.ASHWINI_CRON_SECRET ?? process.env.CRON_SECRET;
 
   if (!secret) {
     return Response.json(
-      { error: "ASHWINI_CRON_SECRET is not configured; the scheduler endpoint is disabled." },
+      {
+        error:
+          "Neither ASHWINI_CRON_SECRET nor CRON_SECRET is configured; the scheduler endpoint is disabled.",
+      },
       { status: 501, headers: { "cache-control": "no-store" } },
     );
   }
 
-  // Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`; a launchd curl can
+  // Vercel Cron sends `Authorization: Bearer <secret>`; a launchd curl can
   // send the same header.
   const presented = request.headers.get("authorization");
   if (presented !== `Bearer ${secret}`) {
