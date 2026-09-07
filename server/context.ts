@@ -3,7 +3,12 @@ import type { Clock } from "@/domain/clock";
 import { dayWindow } from "@/domain/clock";
 import type { Domain } from "@/domain/domains";
 import type { ConfoundDefinition, ConfoundEvaluation } from "@/domain/gate";
-import type { SubjectContext } from "@/domain/advisor";
+import {
+  classifySensitiveContent,
+  SENSITIVE_REDACTION,
+  type SubjectContext,
+} from "@/domain/advisor";
+import { sql } from "kysely";
 import { db } from "./db/client";
 
 /**
@@ -26,6 +31,10 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
     evaluations,
     meals,
     commitments,
+    routines,
+    healthHistory,
+    recentCheckins,
+    healthObservations,
   ] = await Promise.all([
     kysely
       .selectFrom("ashwini.medications")
@@ -53,6 +62,7 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
         "error",
       ])
       .where("error", "is", null)
+      .where("provider", "=", "Examine Connect")
       .orderBy("requested_ts", "desc")
       .limit(25)
       .execute(),
@@ -96,6 +106,86 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
       .orderBy("starts_at", "asc")
       .limit(10)
       .execute(),
+
+    kysely
+      .selectFrom("ashwini.routines")
+      .select(["routine_id", "name", "domain"])
+      .where("status", "=", "active")
+      .orderBy("routine_id")
+      .execute(),
+
+    kysely
+      .selectFrom("ashwini.health_context_entries as entry")
+      .innerJoin(
+        kysely
+          .selectFrom("ashwini.health_context_sources")
+          .select(["source_id", "source_label"])
+          .distinctOn("source_key")
+          .orderBy("source_key")
+          .orderBy("version_seq", "desc")
+          .as("source"),
+        "source.source_id",
+        "entry.source_id",
+      )
+      .select([
+        "entry.context_id",
+        "entry.category",
+        "entry.statement",
+        "source.source_label",
+        "entry.source_locator",
+        "entry.date_precision",
+        "entry.temporal_status",
+        "entry.confirmation_required",
+        // pg parses DATE through the machine timezone; text preserves the source calendar date.
+        sql<string | null>`entry.source_date::text`.as("source_date"),
+      ])
+      .orderBy("source.source_id")
+      .orderBy("entry.entry_key")
+      .execute(),
+
+    kysely
+      .selectFrom("ashwini.messages")
+      .select(["message_id", "text", "ts", sql<Date>`coalesce(captured_at, ts)`.as("event_at")])
+      .where("role", "=", "user")
+      .where("corrected_by", "is", null)
+      .where("text", "not in", Object.values(SENSITIVE_REDACTION))
+      .where("ts", "<=", now)
+      .where(sql<Date>`coalesce(captured_at, ts)`, "<=", now)
+      .orderBy("event_at", "desc")
+      .orderBy("ts", "desc")
+      .orderBy("message_id", "desc")
+      .limit(20)
+      .execute(),
+
+    kysely
+      .selectFrom(
+        kysely
+          .selectFrom("ashwini.health_observations")
+          .select([
+            "identity",
+            "type",
+            "unit",
+            "source_name",
+            "device",
+            "value",
+            "start_at",
+            "end_at",
+          ])
+          .where("end_at", "<=", now)
+          .distinctOn(["type", "unit", "source_name", "device"])
+          .orderBy("type")
+          .orderBy("unit")
+          .orderBy("source_name")
+          .orderBy("device")
+          .orderBy("end_at", "desc")
+          .orderBy("identity")
+          .as("latest"),
+      )
+      .selectAll()
+      .orderBy("end_at", "desc")
+      .orderBy("identity")
+      .limit(40)
+      .execute(),
   ]);
 
   return {
@@ -111,8 +201,47 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
       startsAt: commitment.starts_at,
     })),
 
-    // Routines arrive with PRD 13.5b; the advisor tolerates an empty list.
-    activeRoutines: [],
+    activeRoutines: routines.map((routine) => ({
+      id: routine.routine_id,
+      name: routine.name,
+      domain: routine.domain,
+      status: "tracking",
+    })),
+
+    healthHistory: healthHistory.map((entry) => ({
+      id: entry.context_id,
+      category: entry.category,
+      statement: entry.statement,
+      sourceLabel: entry.source_label,
+      sourceLocator: entry.source_locator,
+      sourceDate: entry.source_date,
+      sourceDatePrecision: entry.date_precision,
+      temporalStatus: entry.temporal_status,
+      confirmationRequired: entry.confirmation_required,
+    })),
+
+    recentCheckins: recentCheckins
+      // Defense in depth if older records predate protected-content redaction.
+      .filter((message) => classifySensitiveContent(message.text) === null)
+      .map((message) => ({
+        id: message.message_id,
+        text: message.text,
+        at: message.event_at,
+        receivedAt: message.ts,
+      })),
+
+    healthObservations: healthObservations.map((reading) => ({
+      id: reading.identity,
+      type: reading.type,
+      unit: reading.unit,
+      sourceName: reading.source_name,
+      device: reading.device,
+      latestValue: reading.value,
+      latestStartAt: reading.start_at.toISOString(),
+      latestEndAt: reading.end_at.toISOString(),
+      // This is the selected latest sample, NOT a count of longitudinal evidence.
+      samplesInInput: 1,
+    })),
 
     medications: medications.map((medication) => ({
       name: medication.name,

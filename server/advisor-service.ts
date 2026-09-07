@@ -4,7 +4,6 @@ import type { Clock } from "@/domain/clock";
 import { systemClock } from "@/domain/clock";
 import {
   classifySensitiveContent,
-  createRulesAdvisor,
   SENSITIVE_REDACTION,
   type AdvisorOutput,
   type AttachmentRef,
@@ -17,6 +16,8 @@ import { db } from "./db/client";
 import type { Database } from "./db/types";
 import { buildSubjectContext } from "./context";
 import { env } from "./env";
+import { createContextualAdvisor } from "./contextual-advisor";
+import { researchForCheckin } from "./research";
 
 /**
  * The one entry point for a conversational input.
@@ -86,7 +87,15 @@ export async function handleUtterance(
   clock: Clock = systemClock(env().ASHWINI_TIME_ZONE),
 ): Promise<HandleUtteranceResult> {
   const kysely = db();
-  const advisor = createRulesAdvisor();
+  const settings = env();
+  const advisor = createContextualAdvisor(
+    {
+      consent: settings.ASHWINI_MODEL_CONTEXT_CONSENT === "openai-v1",
+      ...(settings.OPENAI_API_KEY ? { apiKey: settings.OPENAI_API_KEY } : {}),
+      ...(settings.ASHWINI_MODEL ? { model: settings.ASHWINI_MODEL } : {}),
+    },
+    { research: researchForCheckin },
+  );
   const now = clock.now();
   const sensitiveRuleId = classifySensitiveContent(input.text);
   const persistedUserText = retainedUserText(sensitiveRuleId, input.text);
@@ -106,8 +115,15 @@ export async function handleUtterance(
   const context = await buildSubjectContext(clock);
   const output = await advisor.respond({
     now,
+    ...(input.capturedAt ? { capturedAt: input.capturedAt } : {}),
     utterance: { text: input.text, attachments: input.attachments ?? [] },
-    context,
+    context: input.correctionOf
+      ? {
+          ...context,
+          recentCheckins:
+            context.recentCheckins?.filter((item) => item.id !== input.correctionOf) ?? [],
+        }
+      : context,
   });
 
   // Crisis routing remains terminal. Therapy privacy is independent of route

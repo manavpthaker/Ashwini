@@ -72,6 +72,24 @@ export interface RoutineSummary {
  * it belongs here — a rule reaching for anything else is a bug.
  */
 export interface SubjectContext {
+  readonly healthObservations?: readonly {
+    readonly id: string;
+    readonly type: string;
+    readonly unit: string | null;
+    readonly sourceName: string;
+    readonly device: string | null;
+    readonly latestValue: string;
+    readonly latestStartAt: string;
+    readonly latestEndAt: string;
+    readonly samplesInInput: number;
+  }[];
+  readonly healthHistory?: readonly HealthHistoryEntry[];
+  readonly recentCheckins?: readonly {
+    readonly id: string;
+    readonly text: string;
+    readonly at: Date;
+    readonly receivedAt?: Date;
+  }[];
   readonly mealsToday: readonly MealSummary[];
   readonly commitments: readonly Commitment[];
   readonly activeRoutines: readonly RoutineSummary[];
@@ -82,9 +100,34 @@ export interface SubjectContext {
   readonly confoundEvaluations: readonly import("../gate").ConfoundEvaluation[];
 }
 
+/** Source assertions remain dated context, not newly verified clinical facts. */
+export interface HealthHistoryEntry {
+  readonly id: string;
+  readonly category:
+    | "condition"
+    | "medication_history"
+    | "supplement_history"
+    | "goal"
+    | "nutrition"
+    | "training"
+    | "sleep"
+    | "preference"
+    | "measurement"
+    | "care_context";
+  readonly statement: string;
+  readonly sourceLabel: string;
+  readonly sourceLocator: string;
+  readonly sourceDate: string | null;
+  readonly sourceDatePrecision?: "day" | "month" | "year" | "unknown";
+  readonly temporalStatus: "historical" | "current" | "uncertain";
+  readonly confirmationRequired: boolean;
+}
+
 export interface AdvisorInput {
   /** Injected, never read from the ambient clock. */
   readonly now: Date;
+  /** When a delayed check-in was captured; received time is still `now`. */
+  readonly capturedAt?: Date;
   readonly utterance: Utterance;
   readonly context: SubjectContext;
 }

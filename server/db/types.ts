@@ -3,6 +3,11 @@ import type { ColumnType, Generated } from "kysely";
 import type { Domain } from "@/domain/domains";
 import type { EvidenceStatus, GateOutcome } from "@/domain/evidence";
 import type { DecisionType, MessageKind, RecordDraft, RouteDestination } from "@/domain/advisor";
+import type {
+  HealthContextCategory,
+  HealthContextTemporalStatus,
+  SourceDatePrecision,
+} from "@/lib/health-context";
 
 /**
  * The Kysely view of the tables the application currently reads and writes.
@@ -289,7 +294,54 @@ export interface MedicationsTable {
   manipulable: boolean;
 }
 
+export interface HealthContextSourcesTable {
+  source_id: Generated<string>;
+  source_key: Immutable<string>;
+  source_label: Immutable<string>;
+  source_locator: Immutable<string>;
+  content_hash: Immutable<string>;
+  payload_hash: Immutable<string>;
+  curation_revision: ImmutableDefault<number>;
+  source_date: Immutable<string | null>;
+  date_precision: Immutable<SourceDatePrecision>;
+  imported_ts: Timestamp;
+  version_seq: Generated<string>;
+}
+
+export interface HealthContextEntriesTable {
+  context_id: Generated<string>;
+  source_id: Immutable<string>;
+  entry_key: Immutable<string>;
+  category: Immutable<HealthContextCategory>;
+  statement: Immutable<string>;
+  source_locator: Immutable<string>;
+  source_date: Immutable<string | null>;
+  date_precision: Immutable<SourceDatePrecision>;
+  temporal_status: Immutable<HealthContextTemporalStatus>;
+  confirmation_required: Immutable<boolean>;
+}
+
+export interface HealthObservationsTable {
+  identity: Immutable<string>;
+  first_import_id: Immutable<string>;
+  kind: Immutable<"record" | "workout">;
+  type: Immutable<string>;
+  value: Immutable<string>;
+  unit: Immutable<string | null>;
+  source_name: Immutable<string>;
+  source_version: Immutable<string | null>;
+  device: Immutable<string | null>;
+  start_at: Immutable<Date>;
+  end_at: Immutable<Date>;
+  original_start_at: Immutable<string>;
+  original_end_at: Immutable<string>;
+  source_created_at: Immutable<Date | null>;
+}
+
 export interface Database {
+  "ashwini.health_observations": HealthObservationsTable;
+  "ashwini.health_context_sources": HealthContextSourcesTable;
+  "ashwini.health_context_entries": HealthContextEntriesTable;
   "ashwini.messages": MessagesTable;
   "ashwini.decisions": DecisionsTable;
   "ashwini.decision_responses": DecisionResponsesTable;

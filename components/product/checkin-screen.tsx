@@ -16,6 +16,7 @@ import type { CheckinRecord, PerspectiveTone } from "@/lib/product-model";
 import type { OpenDecision } from "@/lib/record-client";
 import { hasMeaningfulCheckinInput } from "@/lib/checkin-input";
 import styles from "./checkin-screen.module.css";
+import { ResponseText } from "./response-text";
 
 // Openers, not fixtures. The advisor classifies whatever is typed, so these are
 // only here to show the range of things a check-in can be.
@@ -102,7 +103,7 @@ function LatestResponse({
         <p><strong>I heard</strong>{record.originalInput}</p>
         {record.response.acknowledgement && <p><strong>Acknowledged</strong>{record.response.acknowledgement}</p>}
         {record.response.interpretation && <p><strong>Careful read</strong>{record.response.interpretation}</p>}
-        <p><strong>{stepLabel(record)}</strong>{record.response.recommendation}</p>
+        <p><strong>{stepLabel(record)}</strong><ResponseText text={record.response.recommendation} /></p>
       </div>
 
       {openDecision ? (
@@ -216,7 +217,7 @@ function HistoryRecord({
       </summary>
       <div>
         <p>{[record.response.acknowledgement, record.response.interpretation].filter(Boolean).join(" ")}</p>
-        <strong>{record.response.recommendation}</strong>
+        <ResponseText text={record.response.recommendation} />
         {record.response.decision?.selectedChoice && (
           <small>Recorded response · {record.response.decision.selectedChoice}</small>
         )}

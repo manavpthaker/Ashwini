@@ -2,7 +2,12 @@
 
 **Status:** Check-in-led multidisciplinary advisor direction approved; storage topology amended in §4.8 and §11.3; hosting and access model amended in §4.8 and §11.3; the record/interface distinction amended in §4.8 and §11.3
 
-**Version:** 0.8
+**Version:** 0.9
+
+**September 2026 amendment:** Source-backed longitudinal health context and
+provisional multidisciplinary synthesis are now explicit product requirements.
+Importing a history must change what the next check-in can consider. A missing
+baseline may limit confidence; it must not turn every response into intake.
 
 > **On the version numbering.** Two revisions were drafted in parallel and meet here. One reframed the product around a single check-in with coordinated perspectives (§1, §3, §4.3, §4.4, §10, §13, §14) and called itself v0.5. The other amended the privacy topology twice as the implementation moved storage and then the application itself off the Mac mini (§4.8, §11.3), calling those v0.5 and v0.6. Both sets of changes are real and neither supersedes the other; they touch disjoint sections. The amendment labels inside §4.8 are kept as authored, because they name the decision each one records. v0.7 is where the two lines converge; v0.8 is a further amendment on top of it, separating what protects the record from what merely hides the interface.
 
@@ -83,6 +88,7 @@ Every meaningful output carries a label. A guess cannot become a fact by repeate
 | Recorded           | A source says this occurred.                                        | “You logged two afternoon sessions.”                                   |
 | Unusable           | Data quality or confounds prevent interpretation.                   | “No verdict: this window is contaminated.”                             |
 | Rule-based         | An agreed rule applies to current facts.                            | “The recovery rule is active.”                                         |
+| Working hypothesis | A plausible context-and-evidence synthesis, not a diagnosis or proven personal effect. | “Short sleep may be contributing; workload is another possibility.” |
 | Noticed            | A natural variation is worth retaining.                             | “You ate earlier than usual before this session.”                      |
 | Tracking           | The user is deliberately repeating a small routine.                 | “Day 2 of the pre-training meal routine.”                              |
 | Early signal       | A small pattern appears, with material uncertainty.                 | “Both comparable sessions went better; too early to call.”             |
@@ -158,6 +164,36 @@ Ashwini must stay on the appropriate rung for the available evidence.
 | 5     | Specialist routing         | “This new or worsening symptom needs professional evaluation.”                                     | Recommend the safest route and prepare a concise handoff.     |
 
 No Level 3 association may be presented as Level 4 causality. No Level 4 result may be generalized beyond the user, intervention, target, and observation window that produced it.
+
+### 5.1 Hypotheses do not require a completed personal experiment
+
+From the first check-in, Ashwini should combine the relevant historical record,
+current self-report, routines, measurements and research into a useful provisional
+read. It may name plausible contributors, compare alternatives and offer one
+low-risk reversible next step before a longitudinal pattern is proven. State the
+material uncertainty and at most one observation/question that would change the
+read. Do not mistake a confounded personal-comparison window for a prohibition
+on all contextual guidance; the window still cannot support a verdict.
+
+Source assertions retain source dates (or an explicit unknown date), provenance,
+temporal status and confirmation requirements. Historical prescriptions are not
+current prescriptions or adherence. Conflicting plans remain conflicting until
+reconciled. A plan, example or reference weight is not a completed behavior or
+measurement. A corrected check-in is excluded from subsequent context.
+
+Broad knowledge supports hypothesis generation; retrieved evidence supports
+research claims. Search across geographic and historical boundaries where the
+source supports it, but never claim exhaustive worldwide or historical coverage.
+Traditional practice, mechanisms, observational evidence, controlled trials and
+systematic reviews are different evidence categories. Neither prestige, novelty,
+age nor origin substitutes for evidence quality and applicability.
+
+The initial optional model adapter uses selected context with explicit named
+processor consent. Public literature retrieval uses a bounded general-topic
+vocabulary and Europe PMC/PubMed metadata and abstracts, not private search
+queries. It is an abstract-level retrieval aid, not a systematic review, live
+clinical evidence engine or drug-interaction clearance. Unavailable retrieval and
+rules-only fallback must be visible. See PRIVACY.md and HEALTH_CONTEXT.md.
 
 ## 6. The daily-learning loop
 

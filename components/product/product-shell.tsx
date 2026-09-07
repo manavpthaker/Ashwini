@@ -25,14 +25,29 @@ export function ProductShell({ children }: { children: ReactNode }) {
   const activePath = normalizedPath(pathname);
   const previousPath = useRef(pathname);
   const activeLabel =
-    navigation.find((item) => normalizedPath(item.href) === activePath)?.label ?? "Ashwini";
+    navigation.find((item) => normalizedPath(item.href) === activePath)?.label ??
+    (activePath === "/context" ? "Health context" : "Ashwini");
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
+  const [advisorMode, setAdvisorMode] = useState<"checking" | "rules" | "configured" | "unavailable">("checking");
   const recordStatus = recordLoading
     ? "Opening record"
     : recordError
       ? "Record unavailable"
       : "Private record";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/context?mode=1", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Mode unavailable");
+        const value = await response.json() as { mode?: { configured?: boolean } };
+        if (typeof value.mode?.configured !== "boolean") throw new Error("Mode unavailable");
+        if (!controller.signal.aborted) setAdvisorMode(value.mode.configured ? "configured" : "rules");
+      })
+      .catch(() => { if (!controller.signal.aborted) setAdvisorMode("unavailable"); });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (previousPath.current === pathname) return;
@@ -83,10 +98,10 @@ export function ProductShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className={styles.headerStatus}>
-          <span className={styles.previewPill} aria-live="polite">
+          <Link className={styles.previewPill} href="/context/" aria-current={activePath === "/context" ? "page" : undefined}>
             <i aria-hidden="true" />
-            {recordStatus}
-          </span>
+            Health context
+          </Link>
           <details className={styles.boundaryMenu}>
             <summary>
               <ShieldIcon />
@@ -130,7 +145,10 @@ export function ProductShell({ children }: { children: ReactNode }) {
           <ShieldIcon />
           Lifestyle guidance · human specialist for clinical decisions
         </span>
-        <span>{recordStatus} · only saved records appear</span>
+        <span>
+          {advisorMode === "configured" ? "OpenAI model configured" : advisorMode === "rules" ? "Rule-based guidance" : advisorMode === "checking" ? "Checking advisor mode…" : "Advisor status unavailable"}
+          {" · "}{recordStatus}{" · "}<Link href="/context/">Health context</Link>
+        </span>
       </footer>
 
       <nav className={styles.mobileNav} aria-label="Mobile primary navigation">

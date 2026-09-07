@@ -111,14 +111,62 @@ change.
 
 ## Model-provider disclosure
 
-**No model provider is in use.** The advisor is deterministic — an ordered rule
-pipeline in `domain/advisor/`, stamped onto every stored decision as
-`advisor_version` and `rule_id`.
+**Rules-only is the default. OpenAI is an optional, explicitly opted-in processor.**
+The application requires all of `OPENAI_API_KEY`, `ASHWINI_MODEL` and
+`ASHWINI_MODEL_CONTEXT_CONSENT=openai-v1` before model inference. A key alone is
+not consent. Set the consent variable only after the owner agrees to this
+disclosure; never infer it from an existing account or model credential. Health
+context shows configuration status, not a claim that a live model test passed.
 
-No health data has been sent to any inference provider. When that changes, PRD
-§4.8 requires the provider to be disclosed and the boundary opted into before
-personal data reaches it, and the `advisor_version` on every historical decision
-is what keeps rule-era records from being silently reinterpreted by a model.
+When enabled, the server sends the current check-in and selected historical
+assertions, recent uncorrected non-protected check-ins, routines, active medication
+and supplement identities, relevant daily records and a bounded set of imported
+observations to OpenAI's Responses API. Source filesystem paths are omitted from
+the model payload. The full raw source repository, raw Apple Health XML, therapy
+narratives, photos and documents are not sent. Recognized terminal safety routes
+run before external calls. Selected source assertions remain untrusted data, not
+instructions. The model cannot directly update medication schedules or turn its
+own estimates into recorded measurements.
+
+Requests use `store:false`, no provider conversation store and no raw request or
+response logging. This is **not a promise of zero provider retention**: OpenAI's
+abuse-monitoring policies may still apply. API content is not used for model
+training by default. Review the current [OpenAI data controls](https://developers.openai.com/api/docs/guides/your-data)
+before enabling. Request timeout is 25 seconds and output is capped at 4,500
+tokens; account spending limits remain the owner's responsibility. No API key is
+bundled into the client. Failures return visibly labeled rules-only guidance.
+
+Europe PMC receives only general search topics selected from a fixed vocabulary,
+never raw check-ins, profile statements, identifiers or model-generated queries.
+Retrieved abstracts are used transiently; stored provenance is bibliographic
+metadata and the query topic, not full copyrighted abstracts. Public literature
+does not become a current interaction clearance. Historical decisions retain
+their `advisor_version`, `rule_id`, cited source IDs and rendered source links.
+
+### Imported personal context
+
+Curated source versions and assertions live in `health_context_sources` and
+`health_context_entries`. Raw documents are not copied into the database.
+Hashes, locators, source date precision and curation revisions retain provenance.
+These tables and Apple Health import/observation tables enable deny-by-default
+RLS and refuse update/delete, preserving older versions. An explicit new source
+version supersedes the old version for retrieval; it does not rewrite history.
+Imported medications/supplements remain historical context pending confirmation,
+not active prescriptions or adherence. Retention and owner deletion use the same
+policy as the rest of the private record.
+
+Local import payloads/exports belong only in the ignored `private/` directory or
+another owner-private location, never Git, fixtures or public attachments. Source
+documents are reviewed as data: examples, generic instructions and therapy
+narratives are excluded. The import's explicit no-therapy declaration records the
+curation requirement, not a claim of infallible automatic narrative detection.
+
+Apple Health import supports dated records/workouts, not native live sync. Source
+device/app, units, offsets, batch provenance and cross-export deduplication remain
+intact. Route coordinates and clinical documents are excluded. Latest values
+remain dated observations, not fabricated daily totals or longitudinal trends.
+Do not enable external model use of HealthKit-derived context without owner
+permission for that processing. See [Apple Health import](APPLE_HEALTH.md).
 
 ## Offline data handling
 

@@ -19,6 +19,7 @@ import { env } from "@/server/env";
  */
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const postSchema = z.object({
   text: z.string().trim().min(1, "An utterance cannot be empty.").max(4000),

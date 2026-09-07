@@ -2,6 +2,7 @@ export type EvidenceStatus =
   | "Recorded"
   | "Unusable"
   | "Rule-based"
+  | "Working hypothesis"
   | "Noticed"
   | "Tracking"
   | "Early signal"

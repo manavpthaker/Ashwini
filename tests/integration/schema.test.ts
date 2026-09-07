@@ -323,7 +323,7 @@ describeIfDb("schema invariants", () => {
   });
 
   describe("the evidence vocabulary matches the domain layer", () => {
-    it("has exactly the nine PRD 4.5 statuses in order", async () => {
+    it("has exactly the PRD 4.5 statuses in migration order", async () => {
       const { rows } = await client.query<{ labels: string[] }>(
         `select array_agg(e.enumlabel::text order by e.enumsortorder) as labels
          from pg_enum e join pg_type t on t.oid = e.enumtypid
@@ -340,6 +340,7 @@ describeIfDb("schema invariants", () => {
         "consistent_pattern",
         "personally_useful",
         "route_out",
+        "working_hypothesis",
       ]);
     });
 

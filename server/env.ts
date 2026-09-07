@@ -53,6 +53,11 @@ const schema = z.object({
   /** Server credential for the Examine Connect safety endpoint. Never client-side. */
   EXAMINE_CONNECT_API_KEY: z.string().min(1).optional(),
 
+  /** No health context leaves this server without the named processor opt-in. */
+  OPENAI_API_KEY: z.string().trim().min(1).optional(),
+  ASHWINI_MODEL: z.string().trim().min(1).optional(),
+  ASHWINI_MODEL_CONTEXT_CONSENT: z.enum(["openai-v1"]).optional(),
+
   /**
    * The tailnet login permitted to reach this instance.
    *

@@ -15,12 +15,13 @@ import {
 } from "@/domain/evidence";
 
 describe("the PRD 4.5 vocabulary", () => {
-  it("has exactly the nine statuses the PRD table defines", () => {
+  it("has exactly the statuses the PRD table defines", () => {
     // Pinned against docs/PRD.md section 4.5. If the PRD changes, this fails first.
     expect([...EVIDENCE_STATUSES]).toEqual([
       "recorded",
       "unusable",
       "rule_based",
+      "working_hypothesis",
       "noticed",
       "tracking",
       "early_signal",
@@ -59,6 +60,7 @@ describe("assertPermitted", () => {
       ["unusable", 1],
       ["rule_based", 2],
       ["rule_based", 3],
+      ["working_hypothesis", 3],
       ["tracking", 2],
       ["early_signal", 3],
       ["consistent_pattern", 4],

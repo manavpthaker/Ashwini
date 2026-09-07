@@ -16,7 +16,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:apply": "tsx scripts/apply-migrations.ts",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "health:import": "tsx scripts/import-health-context.ts",
+    "health:apple": "tsx scripts/import-apple-health.ts"
   },
   "main": "desktop/main.cjs",
   "dependencies": {
@@ -27,6 +29,7 @@
     "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "saxes": "^6.0.0",
     "server-only": "^0.0.1",
     "zod": "^4.5.2"
   },
