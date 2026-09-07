@@ -20,6 +20,10 @@ import { env } from "./env";
 import { createContextualAdvisor } from "./contextual-advisor";
 import { researchForCheckin } from "./research";
 import { immediateSafetyResponse, preflightContext } from "./checkin-preflight";
+import {
+  encodeAdvisorReplyMetadata,
+  decodeAdvisorReplyMetadata,
+} from "@/lib/advisor-reply-metadata";
 
 /**
  * The one entry point for a conversational input.
@@ -187,6 +191,7 @@ export async function handleUtterance(
           text: output.reply.text,
           kind: output.reply.kind,
           receipt: output.reply.receipt,
+          reply_metadata: encodeAdvisorReplyMetadata(output),
           in_reply_to: userMessage.message_id,
           advisor_version: advisorVersion,
           rule_id: output.trace.ruleId,
@@ -342,7 +347,15 @@ async function loadPersistedReplay(
 ): Promise<HandleUtteranceResult> {
   const reply = await kysely
     .selectFrom("ashwini.messages")
-    .select(["message_id", "text", "kind", "receipt", "advisor_version", "rule_id"])
+    .select([
+      "message_id",
+      "text",
+      "kind",
+      "receipt",
+      "reply_metadata",
+      "advisor_version",
+      "rule_id",
+    ])
     .where("role", "=", "ashwini")
     .where("in_reply_to", "=", existing.message_id)
     .orderBy("ts", "asc")
@@ -435,6 +448,7 @@ async function loadPersistedReplay(
     reviewAt: decision.review_at,
     ruleId: decision.rule_id,
   }));
+  const metadata = decodeAdvisorReplyMetadata(reply.reply_metadata, reply.rule_id);
 
   return {
     userMessageId: existing.message_id,
@@ -446,11 +460,11 @@ async function loadPersistedReplay(
       reply: { text: reply.text, kind: reply.kind, receipt: reply.receipt ?? "" },
       decisions,
       records: replayedRecords,
-      // Follow-ups are deliberately not re-asked from history. The persisted
-      // reply remains authoritative; no current-context text is regenerated.
-      followUp: null,
+      // Exact stored output, including its question and actual reasoning mode.
+      // Replaying the response does not run the advisor or create another turn.
+      followUp: metadata.followUp,
       route: storedDecisions[0]?.route_destination ?? null,
-      trace: { ruleId: reply.rule_id },
+      trace: metadata.trace,
     },
     replayed: true,
   };

@@ -287,9 +287,14 @@ describeIfDb("schema invariants", () => {
   });
 
   describe("PRD 8 — confound thresholds are versioned data", () => {
-    it("seeds every confound class the PRD lists", async () => {
-      const { rows } = await client.query<{ confound_id: string }>(
-        "select confound_id from ashwini.confound_definitions order by confound_id",
+    it("seeds exactly the PRD confound classes at the declared migration version", async () => {
+      // Definitions are extensible/versioned data. Parallel integration suites
+      // add their own version='test' fixtures; those are not migration seeds.
+      // Keep exact membership here so a missing or extra seeded class still fails.
+      const { rows } = await client.query<{ confound_id: string; active: boolean }>(
+        `select confound_id, active from ashwini.confound_definitions
+         where version = $1 order by confound_id`,
+        ["2026-08-29"],
       );
       expect(rows.map((row) => row.confound_id)).toEqual([
         "adherence_below_threshold",
@@ -303,6 +308,7 @@ describeIfDb("schema invariants", () => {
         "sleep_debt",
         "travel",
       ]);
+      expect(rows.every((row) => row.active)).toBe(true);
     });
 
     it("gives every definition a version", async () => {

@@ -34,6 +34,8 @@ export interface MessagesTable {
   text: Immutable<string>;
   kind: Immutable<MessageKind | null>;
   receipt: Immutable<string | null>;
+  /** Versioned exact follow-up/trace output for durable idempotent replay. */
+  reply_metadata: ImmutableDefault<unknown | null>;
   in_reply_to: Immutable<string | null>;
   /** The one mutable column: a correction points forward, it does not overwrite. */
   corrected_by: ColumnType<string | null, string | null, string | null>;

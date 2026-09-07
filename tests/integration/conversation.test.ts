@@ -255,6 +255,77 @@ describeIfDb("conversation round trip", () => {
     expect(rows[0]?.count).toBe("1");
   });
 
+  it("persists the exact follow-up and actual mode for idempotent replay", async () => {
+    const input = {
+      text: "What should I do to improve my focus?",
+      idempotencyKey: `metadata-${crypto.randomUUID()}`,
+    };
+    const first = await handleUtterance(input);
+    expect(first.output.followUp).not.toBeNull();
+    expect(first.output.trace).toMatchObject({ mode: "rules_only", reason: "not_configured" });
+    const stored = await client.query<{ reply_metadata: unknown }>(
+      "select reply_metadata from ashwini.messages where message_id = $1",
+      [first.advisorMessageId],
+    );
+    expect(stored.rows[0]?.reply_metadata).toEqual({
+      version: 1,
+      followUp: first.output.followUp,
+      trace: first.output.trace,
+    });
+    const replay = await handleUtterance(input);
+    expect(replay.replayed).toBe(true);
+    expect(replay.output).toEqual(first.output);
+  });
+
+  it("refuses metadata mutation even when combined with a permitted correction pointer", async () => {
+    const first = await handleUtterance({ text: "Review my nutrition context" });
+    const target = await handleUtterance({ text: "A separate new check-in" });
+    await expect(
+      client.query(
+        "update ashwini.messages set reply_metadata = null, corrected_by = $2 where message_id = $1",
+        [first.advisorMessageId, target.userMessageId],
+      ),
+    ).rejects.toThrow(/append-only/i);
+  });
+
+  it("replays legacy replies without inventing missing follow-up or mode metadata", async () => {
+    const key = `legacy-reply-${crypto.randomUUID()}`;
+    const text = "Legacy synthetic check-in";
+    const user = await client.query<{ message_id: string }>(
+      "insert into ashwini.messages (role, text, kind, idempotency_key) values ('user', $1, 'record', $2) returning message_id",
+      [text, key],
+    );
+    const userId = user.rows[0]!.message_id;
+    await client.query(
+      "insert into ashwini.messages (role, text, kind, receipt, in_reply_to, advisor_version, rule_id) values ('ashwini', 'Legacy saved reply?', 'question', 'Legacy receipt', $1, 'rules-legacy', 'fallback')",
+      [userId],
+    );
+    const replay = await handleUtterance({ text, idempotencyKey: key });
+    expect(replay.replayed).toBe(true);
+    expect(replay.output.followUp).toBeNull();
+    expect(replay.output.trace).toEqual({ ruleId: "fallback" });
+    expect(replay.output.reply.text).toBe("Legacy saved reply?");
+  });
+
+  it.each([
+    {},
+    { version: 1, followUp: null, trace: {} },
+    { version: 1, followUp: null, trace: { ruleId: "different-rule" } },
+    {
+      version: 1,
+      followUp: null,
+      trace: { ruleId: "fallback" },
+      rawError: "PRIVATE_PROVIDER_ERROR",
+    },
+  ])("refuses malformed, mismatched or unallowlisted reply metadata %#", async (metadata) => {
+    await expect(
+      client.query(
+        "insert into ashwini.messages (role, text, kind, rule_id, reply_metadata) values ('ashwini', 'Synthetic reply', 'record', 'fallback', $1::jsonb)",
+        [JSON.stringify(metadata)],
+      ),
+    ).rejects.toThrow();
+  });
+
   it.each([
     ["meal", "I ate lunch: chicken, rice, and yogurt"],
     ["symptom", "my shoulder hurts when I press overhead"],

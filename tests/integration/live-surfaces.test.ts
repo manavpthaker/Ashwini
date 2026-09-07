@@ -173,9 +173,35 @@ describeIfDb("record-backed product surfaces", () => {
     });
   });
 
-  it("keeps the first useful question and a selected action visible after reload", async () => {
+  it("keeps useful guidance, its food-detail question and a selected action visible after reload", async () => {
     const meal = await handleUtterance({ text: "I ate lunch" });
-    expect(meal.output.reply.kind).toBe("question");
+    expect(meal.output.reply.kind).toBe("recommendation");
+    expect(meal.output.reply.text).toContain("Next step:");
+    expect(meal.output.reply.text).toMatch(/what foods made up that meal\?/i);
+    expect(meal.output.records).toEqual([{ kind: "meal", mealKind: "lunch", description: null }]);
+    expect(meal.output.route).toBeNull();
+    const storedMeal = await client.query<{
+      kind: string;
+      description: string | null;
+      kcal_low: number | null;
+      kcal_high: number | null;
+      protein_low_g: number | null;
+      protein_high_g: number | null;
+    }>(
+      `select kind, description, kcal_low, kcal_high, protein_low_g, protein_high_g
+       from ashwini.meals where message_id = $1`,
+      [meal.userMessageId],
+    );
+    expect(storedMeal.rows).toEqual([
+      {
+        kind: "lunch",
+        description: null,
+        kcal_low: null,
+        kcal_high: null,
+        protein_low_g: null,
+        protein_high_g: null,
+      },
+    ]);
 
     const recovery = await handleUtterance({
       text: `Slept badly, feeling flat today ${crypto.randomUUID()}`,
@@ -199,6 +225,7 @@ describeIfDb("record-backed product surfaces", () => {
       turns: {
         userMessage: { messageId: string };
         reply: { kind: string; text: string } | null;
+        records: string[];
         decisions: {
           decisionId: string;
           response: { choice: string; respondedAt: string } | null;
@@ -207,8 +234,8 @@ describeIfDb("record-backed product surfaces", () => {
     };
 
     const mealTurn = body.turns.find((turn) => turn.userMessage.messageId === meal.userMessageId);
-    expect(mealTurn?.reply).toMatchObject({ kind: "question" });
-    expect(mealTurn?.reply?.text).toMatch(/what did you eat/i);
+    expect(mealTurn?.reply).toEqual(meal.output.reply);
+    expect(mealTurn?.records).toEqual(["meal"]);
 
     const recoveryTurn = body.turns.find(
       (turn) => turn.userMessage.messageId === recovery.userMessageId,
