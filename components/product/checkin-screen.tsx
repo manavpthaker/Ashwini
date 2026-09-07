@@ -7,6 +7,7 @@ import {
   checkinFailureNotice,
   correctionDraft,
   hasCorrectionChange,
+  checkinSubmissionAllowed,
 } from "@/components/product/checkin-ux";
 import { decisionControlCopy } from "@/components/product/decision-control";
 import { ArrowIcon, CheckIcon, DocumentIcon, EditIcon, InfoIcon, PhotoIcon, TextIcon, VoiceIcon } from "@/components/product/icons";
@@ -14,7 +15,6 @@ import { useProduct } from "@/components/product/product-provider";
 import { ConversationError } from "@/lib/checkin-client";
 import type { CheckinRecord, PerspectiveTone } from "@/lib/product-model";
 import type { OpenDecision } from "@/lib/record-client";
-import { hasMeaningfulCheckinInput } from "@/lib/checkin-input";
 import styles from "./checkin-screen.module.css";
 import { ResponseText } from "./response-text";
 
@@ -235,6 +235,11 @@ export function CheckinScreen() {
     respondToDecision,
     acknowledgeDecision,
     loading,
+    historyLoading,
+    decisionsLoading,
+    historyError,
+    decisionsError,
+    reloadRecords,
     submitting,
     respondingDecisionId,
     error,
@@ -254,6 +259,7 @@ export function CheckinScreen() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const responseRef = useRef<HTMLDivElement>(null);
   const consumedCompletionId = useRef<string | null>(null);
+  const consumedReviewPrompt = useRef(false);
   const latest = useMemo(() => checkins.find((record) => record.id === latestId) ?? checkins.at(-1), [checkins, latestId]);
   const latestDecision = useMemo(
     () => openDecisions.find((decision) => decision.sourceMessageId === latest?.id),
@@ -264,13 +270,21 @@ export function CheckinScreen() {
   const correctionIsReady = correctionTarget
     ? hasCorrectionChange(draft, correctionTarget, addingCorrectionDetail)
     : true;
-  const canSubmit =
-    hasMeaningfulCheckinInput(draft) &&
-    correctionIsReady &&
-    !submitting &&
-    !loading &&
-    !error;
-  const firstRun = !loading && !error && checkins.length === 0;
+  const canSubmit = checkinSubmissionAllowed({ draft, submitting, correcting: Boolean(correctionOf), correctionReady: correctionIsReady, historyLoading, historyError });
+  const firstRun = !historyLoading && !historyError && checkins.length === 0;
+
+  useEffect(() => {
+    if (consumedReviewPrompt.current || typeof window === "undefined") return;
+    if (new URL(window.location.href).searchParams.get("review") !== "context") return;
+    const frame = window.requestAnimationFrame(() => {
+      if (consumedReviewPrompt.current) return;
+      consumedReviewPrompt.current = true;
+      setDraft("Review my imported health history and wearable summaries. What is the most useful next step for my goals? Explain the evidence, its dates, and the important gaps.");
+      setComposerNotice({ tone: "info", text: "Review request prepared. Edit it if useful, then send it to get your read. Nothing has been submitted." });
+      textareaRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     if (!responseFocusId) return;
@@ -311,7 +325,7 @@ export function CheckinScreen() {
   };
 
   useEffect(() => {
-    if (loading || error || typeof window === "undefined") return;
+    if (historyLoading || historyError || typeof window === "undefined") return;
     const requestedId = new URL(window.location.href).searchParams.get("complete");
     if (!requestedId || consumedCompletionId.current === requestedId) return;
     const frame = window.requestAnimationFrame(() => {
@@ -354,7 +368,7 @@ export function CheckinScreen() {
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [checkins, error, loading, prepareCorrection, supersededIds]);
+  }, [checkins, historyError, historyLoading, prepareCorrection, supersededIds]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -422,7 +436,7 @@ export function CheckinScreen() {
         </div>
         <aside>
           <span>Current plan</span>
-          <strong>{currentPlan(openDecisions[0], latest, loading, error)}</strong>
+          <strong>{currentPlan(openDecisions[0], latest, decisionsLoading, decisionsError)}</strong>
           <small>Recorded, not monitored · nothing here watches you between check-ins</small>
         </aside>
       </header>
@@ -473,12 +487,8 @@ export function CheckinScreen() {
             <span>Saved to your record · corrections supersede, nothing is deleted</span>
             <Button type="submit" disabled={!canSubmit}>
               {submitting
-                ? "Recording…"
-                : loading
-                  ? "Opening record…"
-                  : error
-                    ? "Record unavailable"
-                    : "Save check-in and get my read"}{" "}
+                ? "Preparing your response…"
+                : "Save check-in and get my read"}{" "}
               <ArrowIcon />
             </Button>
           </div>
@@ -488,7 +498,8 @@ export function CheckinScreen() {
       {error && (
         <p className={`${styles.surfaceNotice} ${styles.surfaceNoticeError}`} role="alert">
           <InfoIcon />
-          {error} Nothing below is guaranteed current — treat it as unknown rather than as an empty day.
+          {error} You can still send a new check-in. Previously loaded records may be out of date.
+          <Button variant="secondary" onClick={() => void reloadRecords()} disabled={loading}>Retry record reads</Button>
         </p>
       )}
 
@@ -524,9 +535,9 @@ export function CheckinScreen() {
         </div>
 
         <div className={styles.historyList}>
-          {loading && <p className={styles.surfaceNotice} role="status"><InfoIcon />Loading your record…</p>}
+          {historyLoading && <p className={styles.surfaceNotice} role="status"><InfoIcon />Loading recent check-ins…</p>}
           {checkins.slice().reverse().map((record) => <HistoryRecord key={record.id} record={record} superseded={supersededIds.has(record.id)} onCorrect={prepareCorrection} />)}
-          {!loading && !error && checkins.length === 0 && (
+          {!historyLoading && !historyError && checkins.length === 0 && (
             <p className={styles.surfaceNotice}><InfoIcon />No check-ins recorded yet.</p>
           )}
         </div>

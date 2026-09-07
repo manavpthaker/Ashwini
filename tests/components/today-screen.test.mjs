@@ -5,6 +5,7 @@ import {
   latestContinuityCheckin,
   needsTodayRefresh,
   nextUpcomingTimelineItem,
+  healthBriefIsPrimary,
 } from "@/components/product/today-screen";
 
 const response = (headline) => ({
@@ -157,6 +158,16 @@ describe("Today timeline", () => {
 });
 
 describe("Today continuity priority", () => {
+  test("shows an imported brief only after decisions are available and no safety/action/pending response takes priority", () => {
+    const state = { decisionsLoading: false, decisionsError: null, hasDecision: false, hasPending: false, hasAnswered: false, available: true };
+    expect(healthBriefIsPrimary(state)).toBe(true);
+    expect(healthBriefIsPrimary({ ...state, hasDecision: true })).toBe(false);
+    expect(healthBriefIsPrimary({ ...state, hasPending: true })).toBe(false);
+    expect(healthBriefIsPrimary({ ...state, hasAnswered: true })).toBe(false);
+    expect(healthBriefIsPrimary({ ...state, decisionsLoading: true })).toBe(false);
+    expect(healthBriefIsPrimary({ ...state, decisionsError: "Decision read failed" })).toBe(false);
+    expect(healthBriefIsPrimary({ ...state, available: false })).toBe(false);
+  });
   test("shows the newest recorded response ahead of an older pending question", () => {
     const pending = checkin("pending", "Add one detail");
     pending.response.kind = "follow-up";

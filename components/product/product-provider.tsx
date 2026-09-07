@@ -34,6 +34,11 @@ interface ProductContextValue {
   respondToDecision: (decisionId: string, choice: string) => Promise<void>;
   acknowledgeDecision: (decisionId: string) => Promise<void>;
   loading: boolean;
+  historyLoading: boolean;
+  decisionsLoading: boolean;
+  historyError: string | null;
+  decisionsError: string | null;
+  reloadRecords: () => Promise<void>;
   submitting: boolean;
   respondingDecisionId: string | null;
   error: string | null;
@@ -112,10 +117,15 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   if (checkinWriter.current === null) checkinWriter.current = createRetrySafeCheckinWriter();
   const [checkins, setCheckins] = useState<readonly CheckinRecord[]>([]);
   const [openDecisions, setOpenDecisions] = useState<readonly OpenDecision[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [decisionsLoading, setDecisionsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [respondingDecisionId, setRespondingDecisionId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [decisionsError, setDecisionsError] = useState<string | null>(null);
+  const historyEpoch = useRef(0);
+  const decisionsEpoch = useRef(0);
+  const mutationEpoch = useRef(0);
   const [decisionReceipt, setDecisionReceipt] = useState<{
     readonly decisionId: string;
     readonly text: string;
@@ -124,25 +134,60 @@ export function ProductProvider({ children }: { children: ReactNode }) {
 
   const handleFailure = useCallback((cause: unknown, fallback: string) => {
     if (statusOf(cause) === 401) {
+      historyEpoch.current += 1;
+      decisionsEpoch.current += 1;
       setCheckins([]);
       setOpenDecisions([]);
+      setHistoryLoading(false);
+      setDecisionsLoading(false);
       router.replace("/login");
       return;
     }
-    setError(cause instanceof Error ? cause.message : fallback);
+    setDecisionsError(cause instanceof Error ? cause.message : fallback);
   }, [router]);
 
+  const loadHistory = useCallback(async (signal?: AbortSignal) => {
+    const epoch = ++historyEpoch.current;
+    const mutations = mutationEpoch.current;
+    setHistoryLoading(true);
+    try {
+      const history = await fetchHistory({ signal: readDeadline(signal) });
+      if (signal?.aborted || epoch !== historyEpoch.current) return;
+      setTimeZone(history.timeZone);
+      const records = recordsFromHistory(history);
+      setCheckins((current) => mutations === mutationEpoch.current ? records : mergeRecords(records, current));
+      setHistoryError(null);
+    } catch (cause) {
+      if (signal?.aborted || epoch !== historyEpoch.current) return;
+      if (statusOf(cause) === 401) handleFailure(cause, "Not signed in.");
+      else setHistoryError("Recent check-ins could not be refreshed. Saved responses remain visible; retry the history read.");
+    } finally {
+      if (!signal?.aborted && epoch === historyEpoch.current) setHistoryLoading(false);
+    }
+  }, [handleFailure]);
+
+  const loadDecisions = useCallback(async (signal?: AbortSignal) => {
+    const epoch = ++decisionsEpoch.current;
+    setDecisionsLoading(true);
+    try {
+      const decisions = await fetchOpenDecisions(readDeadline(signal));
+      if (signal?.aborted || epoch !== decisionsEpoch.current) return;
+      setOpenDecisions(decisions);
+      setDecisionsError(null);
+    } catch (cause) {
+      if (!signal?.aborted && epoch === decisionsEpoch.current) {
+        handleFailure(cause, "Current decisions could not be refreshed.");
+      }
+    } finally {
+      if (!signal?.aborted && epoch === decisionsEpoch.current) setDecisionsLoading(false);
+    }
+  }, [handleFailure]);
+
   const loadRecordState = useCallback(async (signal?: AbortSignal) => {
-    const [history, decisions] = await Promise.all([
-      fetchHistory(signal ? { signal } : {}),
-      fetchOpenDecisions(signal),
-    ]);
-    if (signal?.aborted) return;
-    setTimeZone(history.timeZone);
-    setCheckins(recordsFromHistory(history));
-    setOpenDecisions(decisions);
-    setError(null);
-  }, []);
+    await Promise.all([loadHistory(signal), loadDecisions(signal)]);
+  }, [loadHistory, loadDecisions]);
+
+  const reloadRecords = useCallback(() => loadRecordState(), [loadRecordState]);
 
   const handleMutationFailure = useCallback(
     async (cause: unknown, fallback: string) => {
@@ -173,26 +218,12 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const controller = new AbortController();
 
-    Promise.all([
-      fetchHistory({ signal: controller.signal }),
-      fetchOpenDecisions(controller.signal),
-    ])
-      .then(([history, decisions]) => {
-        if (controller.signal.aborted) return;
-        setTimeZone(history.timeZone);
-        setCheckins(recordsFromHistory(history));
-        setOpenDecisions(decisions);
-        setError(null);
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted) handleFailure(cause, "Could not reach your record.");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void loadRecordState(controller.signal);
+    });
 
     return () => controller.abort();
-  }, [handleFailure]);
+  }, [loadRecordState]);
 
   const submitCheckin = useCallback(
     async (input: string, correctionOf?: string) => {
@@ -203,22 +234,17 @@ export function ProductProvider({ children }: { children: ReactNode }) {
           correctionOf ? { correctionOf } : {},
         );
         const record = toRecord(turn, input, correctionOf);
+        mutationEpoch.current += 1;
+        setTimeZone(turn.timeZone);
         setCheckins((current) =>
           current.some((item) => item.id === record.id)
             ? current.map((item) => (item.id === record.id ? record : item))
             : [...current, record],
         );
         setDecisionReceipt(null);
-        setError(null);
-
-        try {
-          setOpenDecisions(await fetchOpenDecisions());
-        } catch (refreshError) {
-          handleFailure(
-            refreshError,
-            "The check-in was recorded, but current decisions could not be refreshed.",
-          );
-        }
+        // A saved response is useful immediately. A secondary read must not
+        // keep the composer pending or hide that response when it fails.
+        void loadDecisions();
 
         return record;
       } catch (cause: unknown) {
@@ -228,7 +254,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
         setSubmitting(false);
       }
     },
-    [handleFailure, handleMutationFailure],
+    [loadDecisions, handleMutationFailure],
   );
 
   const respondToDecision = useCallback(
@@ -237,6 +263,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       setDecisionReceipt(null);
       try {
         const recorded = await respondToOpenDecision(decisionId, choice);
+        mutationEpoch.current += 1;
         setCheckins((current) =>
           current.map((record) =>
             withRecordedDecisionResponse(record, decisionId, choice, recorded.respondedAt),
@@ -249,16 +276,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
           decisionId,
           text: `Recorded · ${choice}`,
         });
-        setError(null);
-
-        try {
-          setOpenDecisions(await fetchOpenDecisions());
-        } catch (refreshError) {
-          handleFailure(
-            refreshError,
-            "Your response was recorded, but current decisions could not be refreshed.",
-          );
-        }
+        void loadDecisions();
       } catch (cause: unknown) {
         await handleMutationFailure(cause, "The response was not recorded.");
         throw cause;
@@ -266,7 +284,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
         setRespondingDecisionId(null);
       }
     },
-    [handleFailure, handleMutationFailure],
+    [loadDecisions, handleMutationFailure],
   );
 
   const acknowledgeDecision = useCallback(
@@ -275,6 +293,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       setDecisionReceipt(null);
       try {
         const recorded = await acknowledgeOpenDecision(decisionId);
+        mutationEpoch.current += 1;
         setCheckins((current) =>
           current.map((record) =>
             withRecordedDecisionResponse(
@@ -292,16 +311,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
           decisionId,
           text: "Acknowledged · this prompt is closed; the underlying concern is not marked resolved.",
         });
-        setError(null);
-
-        try {
-          setOpenDecisions(await fetchOpenDecisions());
-        } catch (refreshError) {
-          handleFailure(
-            refreshError,
-            "The acknowledgment was recorded, but current decisions could not be refreshed.",
-          );
-        }
+        void loadDecisions();
       } catch (cause: unknown) {
         await handleMutationFailure(cause, "The acknowledgment was not recorded.");
         throw cause;
@@ -309,7 +319,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
         setRespondingDecisionId(null);
       }
     },
-    [handleFailure, handleMutationFailure],
+    [loadDecisions, handleMutationFailure],
   );
 
   useEffect(() => {
@@ -326,18 +336,11 @@ export function ProductProvider({ children }: { children: ReactNode }) {
           (decision) => !decision.expiresAt || new Date(decision.expiresAt).getTime() > Date.now(),
         ),
       );
-      void fetchOpenDecisions()
-        .then((decisions) => {
-          setOpenDecisions(decisions);
-          setError(null);
-        })
-        .catch((cause: unknown) =>
-          handleFailure(cause, "Current decisions could not be refreshed after expiry."),
-        );
+      void loadDecisions();
     }, delay);
 
     return () => window.clearTimeout(timer);
-  }, [handleFailure, openDecisions]);
+  }, [loadDecisions, openDecisions]);
 
   return (
     <ProductContext.Provider
@@ -347,10 +350,15 @@ export function ProductProvider({ children }: { children: ReactNode }) {
         submitCheckin,
         respondToDecision,
         acknowledgeDecision,
-        loading,
+        loading: historyLoading || decisionsLoading,
+        historyLoading,
+        decisionsLoading,
+        historyError,
+        decisionsError,
+        reloadRecords,
         submitting,
         respondingDecisionId,
-        error,
+        error: historyError ?? decisionsError,
         decisionReceipt,
         timeZone,
       }}
@@ -358,6 +366,18 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       {children}
     </ProductContext.Provider>
   );
+}
+
+/** Preserve a just-saved POST result when an older history read finishes late. */
+export function mergeRecords(history: readonly CheckinRecord[], current: readonly CheckinRecord[]): readonly CheckinRecord[] {
+  const records = new Map(history.map((record) => [record.id, record]));
+  for (const record of current) records.set(record.id, record);
+  return [...records.values()].sort((left, right) => (left.recordedAt ?? "").localeCompare(right.recordedAt ?? ""));
+}
+
+function readDeadline(signal?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(15_000);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
 }
 
 function statusOf(cause: unknown): number | null {

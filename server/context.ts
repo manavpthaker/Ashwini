@@ -8,8 +8,57 @@ import {
   SENSITIVE_REDACTION,
   type SubjectContext,
 } from "@/domain/advisor";
+import type { HealthHistoryEntry } from "@/domain/advisor/types";
 import { sql } from "kysely";
 import { db } from "./db/client";
+import { buildHealthObservationContext } from "./health-observation-context";
+
+export { buildHealthObservationContext } from "./health-observation-context";
+
+/** Context browsing must not load the raw wearable chart or operational check-in state. */
+export async function buildHealthHistory(): Promise<HealthHistoryEntry[]> {
+  const kysely = db();
+  const entries = await kysely
+    .selectFrom("ashwini.health_context_entries as entry")
+    .innerJoin(
+      kysely
+        .selectFrom("ashwini.health_context_sources")
+        .select(["source_id", "source_label"])
+        .distinctOn("source_key")
+        .orderBy("source_key")
+        .orderBy("version_seq", "desc")
+        .as("source"),
+      "source.source_id",
+      "entry.source_id",
+    )
+    .select([
+      "entry.context_id",
+      "entry.category",
+      "entry.statement",
+      "source.source_label",
+      "entry.source_locator",
+      "entry.date_precision",
+      "entry.temporal_status",
+      "entry.confirmation_required",
+      // Preserve the source calendar date, independent of the host timezone.
+      sql<string | null>`entry.source_date::text`.as("source_date"),
+    ])
+    .orderBy("entry.category")
+    .orderBy("entry.source_date", "desc")
+    .orderBy("entry.context_id")
+    .execute();
+  return entries.map((entry) => ({
+    id: entry.context_id,
+    category: entry.category,
+    statement: entry.statement,
+    sourceLabel: entry.source_label,
+    sourceLocator: entry.source_locator,
+    sourceDate: entry.source_date,
+    sourceDatePrecision: entry.date_precision,
+    temporalStatus: entry.temporal_status,
+    confirmationRequired: entry.confirmation_required,
+  }));
+}
 
 /**
  * Materialise everything the advisor is allowed to reason from.
@@ -18,7 +67,10 @@ import { db } from "./db/client";
  * testable without a database, and what stops a rule quietly reaching for a
  * fact nobody declared. Every read the rules need happens here, once.
  */
-export async function buildSubjectContext(clock: Clock): Promise<SubjectContext> {
+export async function buildSubjectContext(
+  clock: Clock,
+  options: { text?: string; includeWearables?: boolean } = {},
+): Promise<SubjectContext> {
   const now = clock.now();
   const window = dayWindow(clock, now);
   const kysely = db();
@@ -34,7 +86,8 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
     routines,
     healthHistory,
     recentCheckins,
-    healthObservations,
+    latestReceiptTurn,
+    observationContext,
   ] = await Promise.all([
     kysely
       .selectFrom("ashwini.medications")
@@ -114,78 +167,65 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
       .orderBy("routine_id")
       .execute(),
 
-    kysely
-      .selectFrom("ashwini.health_context_entries as entry")
-      .innerJoin(
-        kysely
-          .selectFrom("ashwini.health_context_sources")
-          .select(["source_id", "source_label"])
-          .distinctOn("source_key")
-          .orderBy("source_key")
-          .orderBy("version_seq", "desc")
-          .as("source"),
-        "source.source_id",
-        "entry.source_id",
-      )
-      .select([
-        "entry.context_id",
-        "entry.category",
-        "entry.statement",
-        "source.source_label",
-        "entry.source_locator",
-        "entry.date_precision",
-        "entry.temporal_status",
-        "entry.confirmation_required",
-        // pg parses DATE through the machine timezone; text preserves the source calendar date.
-        sql<string | null>`entry.source_date::text`.as("source_date"),
-      ])
-      .orderBy("source.source_id")
-      .orderBy("entry.entry_key")
-      .execute(),
+    buildHealthHistory(),
 
     kysely
-      .selectFrom("ashwini.messages")
-      .select(["message_id", "text", "ts", sql<Date>`coalesce(captured_at, ts)`.as("event_at")])
-      .where("role", "=", "user")
-      .where("corrected_by", "is", null)
-      .where("text", "not in", Object.values(SENSITIVE_REDACTION))
-      .where("ts", "<=", now)
-      .where(sql<Date>`coalesce(captured_at, ts)`, "<=", now)
-      .orderBy("event_at", "desc")
-      .orderBy("ts", "desc")
-      .orderBy("message_id", "desc")
+      .selectFrom("ashwini.messages as user_message")
+      .leftJoinLateral(
+        (eb) =>
+          eb
+            .selectFrom("ashwini.messages as advisor_message")
+            .select([
+              "advisor_message.message_id as advisor_message_id",
+              "advisor_message.text as advisor_reply",
+              "advisor_message.ts as advisor_at",
+            ])
+            .whereRef("advisor_message.in_reply_to", "=", "user_message.message_id")
+            .where("advisor_message.role", "=", "ashwini")
+            .where("advisor_message.corrected_by", "is", null)
+            .where("advisor_message.ts", "<=", now)
+            .orderBy("advisor_message.ts", "desc")
+            .orderBy("advisor_message.message_id", "desc")
+            .limit(1)
+            .as("reply"),
+        (join) => join.onTrue(),
+      )
+      .select([
+        "user_message.message_id",
+        "user_message.text",
+        "user_message.ts",
+        "reply.advisor_message_id",
+        "reply.advisor_reply",
+        "reply.advisor_at",
+        sql<Date>`coalesce(user_message.captured_at, user_message.ts)`.as("event_at"),
+      ])
+      .where("user_message.role", "=", "user")
+      .where("user_message.corrected_by", "is", null)
+      .where("user_message.text", "not in", Object.values(SENSITIVE_REDACTION))
+      .where("user_message.ts", "<=", now)
+      .where(sql<Date>`coalesce(user_message.captured_at, user_message.ts)`, "<=", now)
+      // Continuity follows receipt order, not when a delayed report happened.
+      // Keep event_at separately so old events never become current evidence.
+      .orderBy("user_message.ts", "desc")
+      .orderBy("user_message.message_id", "desc")
       .limit(20)
       .execute(),
 
+    // Ineligible text never leaves this module, but its receipt must still block
+    // continuity from falling back to a question asked before that turn.
     kysely
-      .selectFrom(
-        kysely
-          .selectFrom("ashwini.health_observations")
-          .select([
-            "identity",
-            "type",
-            "unit",
-            "source_name",
-            "device",
-            "value",
-            "start_at",
-            "end_at",
-          ])
-          .where("end_at", "<=", now)
-          .distinctOn(["type", "unit", "source_name", "device"])
-          .orderBy("type")
-          .orderBy("unit")
-          .orderBy("source_name")
-          .orderBy("device")
-          .orderBy("end_at", "desc")
-          .orderBy("identity")
-          .as("latest"),
-      )
-      .selectAll()
-      .orderBy("end_at", "desc")
-      .orderBy("identity")
-      .limit(40)
-      .execute(),
+      .selectFrom("ashwini.messages")
+      .select(["message_id", "ts", "text", "captured_at", "corrected_by"])
+      .where("role", "=", "user")
+      .where("ts", "<=", now)
+      .orderBy("ts", "desc")
+      .orderBy("message_id", "desc")
+      .limit(1)
+      .executeTakeFirst(),
+
+    options.includeWearables === false
+      ? Promise.resolve({})
+      : buildHealthObservationContext(clock, options, kysely),
   ]);
 
   return {
@@ -208,17 +248,19 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
       status: "tracking",
     })),
 
-    healthHistory: healthHistory.map((entry) => ({
-      id: entry.context_id,
-      category: entry.category,
-      statement: entry.statement,
-      sourceLabel: entry.source_label,
-      sourceLocator: entry.source_locator,
-      sourceDate: entry.source_date,
-      sourceDatePrecision: entry.date_precision,
-      temporalStatus: entry.temporal_status,
-      confirmationRequired: entry.confirmation_required,
-    })),
+    healthHistory,
+
+    latestReceiptTurn: latestReceiptTurn
+      ? {
+          id: latestReceiptTurn.message_id,
+          receivedAt: latestReceiptTurn.ts,
+          eligible:
+            latestReceiptTurn.corrected_by === null &&
+            (latestReceiptTurn.captured_at === null || latestReceiptTurn.captured_at <= now) &&
+            !Object.values(SENSITIVE_REDACTION).includes(latestReceiptTurn.text) &&
+            classifySensitiveContent(latestReceiptTurn.text) === null,
+        }
+      : null,
 
     recentCheckins: recentCheckins
       // Defense in depth if older records predate protected-content redaction.
@@ -228,20 +270,15 @@ export async function buildSubjectContext(clock: Clock): Promise<SubjectContext>
         text: message.text,
         at: message.event_at,
         receivedAt: message.ts,
+        advisorReply:
+          message.advisor_reply && classifySensitiveContent(message.advisor_reply) === null
+            ? message.advisor_reply
+            : null,
+        advisorMessageId: message.advisor_message_id,
+        advisorAt: message.advisor_at,
       })),
 
-    healthObservations: healthObservations.map((reading) => ({
-      id: reading.identity,
-      type: reading.type,
-      unit: reading.unit,
-      sourceName: reading.source_name,
-      device: reading.device,
-      latestValue: reading.value,
-      latestStartAt: reading.start_at.toISOString(),
-      latestEndAt: reading.end_at.toISOString(),
-      // This is the selected latest sample, NOT a count of longitudinal evidence.
-      samplesInInput: 1,
-    })),
+    ...observationContext,
 
     medications: medications.map((medication) => ({
       name: medication.name,

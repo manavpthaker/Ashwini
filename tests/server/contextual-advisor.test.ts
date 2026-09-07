@@ -5,6 +5,7 @@ import {
   selectHealthHistory,
 } from "@/server/contextual-advisor";
 import type { AdvisorInput } from "@/domain/advisor";
+import type { HealthHistoryEntry } from "@/domain/advisor/types";
 
 const input: AdvisorInput = {
   now: new Date("2026-09-06T16:00:00Z"),
@@ -198,6 +199,181 @@ describe("context-aware advisor", () => {
       },
     });
     expect(selected.map((item) => item.id)).toEqual(["old-sleep"]);
+  });
+
+  it("retrieves relevant last-position facts from 500+ entries independently of source order", () => {
+    const clinicalHistory: HealthHistoryEntry[] = Array.from({ length: 550 }, (_, index) => ({
+      ...input.context.healthHistory![0]!,
+      id: `clinical-${index}`,
+      category: index % 2 ? "condition" : "medication_history",
+      sourceLabel: "Synthetic clinical archive",
+      sourceLocator: `synthetic-resource-${index}`,
+      statement: `Synthetic historical entry number ${index}.`,
+      sourceDate: "2026-08-01",
+    }));
+    const relevant: HealthHistoryEntry[] = [
+      {
+        ...input.context.healthHistory![0]!,
+        id: "target-lab",
+        category: "measurement",
+        sourceLabel: "Synthetic lab archive",
+        statement: "Ferritin result was recorded by the laboratory.",
+        sourceDate: "2025-02-01",
+      },
+      {
+        ...input.context.healthHistory![0]!,
+        id: "personal-plan",
+        category: "goal",
+        sourceLabel: "Synthetic personal goals",
+        statement: "Earlier recovery plan prioritized a consistent bedtime.",
+      },
+      input.context.healthHistory![0]!,
+    ];
+    const largeInput = {
+      ...input,
+      utterance: {
+        text: "What do my ferritin and sleep history add to my recovery plan?",
+        attachments: [],
+      },
+      context: { ...input.context, healthHistory: [...clinicalHistory, ...relevant] },
+    };
+    const selected = selectHealthHistory(largeInput);
+    const reversed = selectHealthHistory({
+      ...largeInput,
+      context: {
+        ...largeInput.context,
+        healthHistory: [...largeInput.context.healthHistory].reverse(),
+      },
+    });
+    expect(selected).toHaveLength(60);
+    expect(selected.map((entry) => entry.id)).toEqual(reversed.map((entry) => entry.id));
+    expect(selected.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(relevant.map((entry) => entry.id)),
+    );
+    expect(new Set(selected.map((entry) => entry.category)).size).toBeGreaterThanOrEqual(4);
+    expect(new Set(selected.map((entry) => entry.sourceLabel)).size).toBeGreaterThanOrEqual(4);
+  });
+
+  it.each(["I feel fatigue", "I slept poorly", "What is recorded about ferritin?"])(
+    "makes dated measurements eligible for %s without interpreting them",
+    (text) => {
+      const measurement: HealthHistoryEntry = {
+        ...input.context.healthHistory![0]!,
+        id: "synthetic-lab",
+        category: "measurement",
+        statement: "Ferritin result recorded on the lab report.",
+      };
+      const selected = selectHealthHistory({
+        ...input,
+        utterance: { text, attachments: [] },
+        context: { ...input.context, healthHistory: [measurement] },
+      });
+      expect(selected).toEqual([measurement]);
+    },
+  );
+
+  it("uses recorded recency only after relevance and does not rank status flags as clinical importance", () => {
+    const old: HealthHistoryEntry = {
+      ...input.context.healthHistory![0]!,
+      id: "old-current-flag",
+      sourceDate: "2023-01-01",
+      temporalStatus: "current",
+      confirmationRequired: false,
+    };
+    const newer: HealthHistoryEntry = {
+      ...old,
+      id: "newer-historical",
+      sourceDate: "2025-01-01",
+      temporalStatus: "historical",
+      confirmationRequired: true,
+    };
+    const unknown: HealthHistoryEntry = {
+      ...old,
+      id: "unknown-date",
+      sourceDate: "2026-01-01",
+      sourceDatePrecision: "unknown",
+    };
+    const selected = selectHealthHistory({
+      ...input,
+      context: { ...input.context, healthHistory: [old, unknown, newer] },
+    });
+    expect(selected.map((entry) => entry.id)).toEqual([
+      "newer-historical",
+      "old-current-flag",
+      "unknown-date",
+    ]);
+  });
+
+  it("labels rules-only mode even when saved history is unrelated to the check-in", async () => {
+    const fetcher = vi.fn();
+    const result = await createContextualAdvisor({ consent: false }, { fetcher }).respond({
+      ...input,
+      utterance: { text: "I need help organizing tomorrow", attachments: [] },
+    });
+    expect(result.reply.text).toContain("model synthesis is not enabled");
+    expect(result.reply.receipt).toContain("rules only");
+    expect(result.reply.text).not.toContain("Earlier plan");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("surfaces only a bounded dated relevant observation in rules-only mode, never a trend", async () => {
+    const observations = [
+      {
+        id: "synthetic-sleep",
+        type: "HKCategoryTypeIdentifierSleepAnalysis",
+        unit: null,
+        sourceName: "Synthetic wearable",
+        device: null,
+        latestValue: "HKCategoryValueSleepAnalysisAsleepCore",
+        latestStartAt: "2026-09-05T01:00:00Z",
+        latestEndAt: "2026-09-05T02:00:00Z",
+        samplesInInput: 1,
+      },
+    ];
+    const future = {
+      ...observations[0]!,
+      id: "future",
+      latestValue: "FUTURE_SAMPLE_MARKER",
+      latestStartAt: "2027-01-01T01:00:00Z",
+      latestEndAt: "2027-01-01T02:00:00Z",
+    };
+    const result = await createContextualAdvisor({ consent: false }).respond({
+      ...input,
+      utterance: { text: "I slept poorly", attachments: [] },
+      context: {
+        ...input.context,
+        healthHistory: [],
+        healthObservations: [...observations, future],
+      },
+    });
+    expect(result.reply.text).toContain(
+      "Recorded sample (Sleep Analysis; 2026-09-05T01:00:00Z to 2026-09-05T02:00:00Z",
+    );
+    expect(result.reply.text).toContain("HKCategoryValueSleepAnalysisAsleepCore");
+    expect(result.reply.text).toContain("not a current value, daily total or trend");
+    expect(result.reply.text).toContain("no clinical interpretation is made");
+    expect(result.reply.text).toContain("model synthesis is not enabled");
+    expect(result.reply.text).not.toContain("FUTURE_SAMPLE_MARKER");
+    expect(result.reply.text.match(/Recorded sample/g)).toHaveLength(1);
+    expect(result.decisions[0]?.sources).toContainEqual({
+      table: "health_observations",
+      id: "synthetic-sleep",
+    });
+  });
+
+  it.each([
+    "I have crushing chest pain",
+    "My therapist told me something private",
+    "Should I add creatine?",
+  ])("does not append imported details or change terminal routes for %s", async (text) => {
+    const result = await createContextualAdvisor({ consent: false }).respond({
+      ...input,
+      utterance: { text, attachments: [] },
+    });
+    expect(result.reply.text).not.toContain("Saved context");
+    expect(result.reply.text).not.toContain("model synthesis is not enabled");
+    expect(result.reply.text).not.toContain("Recorded sample");
+    expect(result.trace.ruleId).not.toBe("contextual-synthesis");
   });
 
   it.each([

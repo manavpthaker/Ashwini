@@ -48,6 +48,7 @@ async function main(): Promise<void> {
     await client.query("alter table staged_health_observations drop column first_import_id");
     await client.query("create unique index on staged_health_observations(identity)");
     let stagedCount = 0;
+    let nextProgress = 50_000;
     const report = await parseAppleHealthXml(createReadStream(path), async (observations) => {
       for (let start = 0; start < observations.length; start += 250) {
         const items = observations.slice(start, start + 250).map(toDatabaseRow);
@@ -58,6 +59,10 @@ async function main(): Promise<void> {
           [JSON.stringify(items)],
         );
         stagedCount += result.rowCount ?? 0;
+        if (stagedCount >= nextProgress) {
+          process.stderr.write(`Staged ${stagedCount} unique samples; not yet committed.\n`);
+          nextProgress += 50_000;
+        }
       }
     });
     const imported = await client.query<{ import_id: string }>(
@@ -135,7 +140,7 @@ main().catch((error: unknown) => {
   const message =
     error instanceof AppleHealthImportError
       ? error.message
-      : "Apple Health import failed. Check file access, database migrations, credentials and verified TLS. No partial import was committed.";
+      : "Apple Health import could not be confirmed. Check file access, database migrations, credentials and verified TLS. Before retrying, read back the import fingerprint: a connection failure during commit can leave its outcome uncertain. Identical retries are idempotent.";
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });

@@ -31,9 +31,61 @@ function memoryStorage() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("browser check-in write identity", () => {
+  it("bounds a stalled request and preserves the same key for an uncertain retry", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          }),
+      )
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ...TURN, userText: TURN.text }), { status: 201 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const writer = createRetrySafeCheckinWriter(
+      () => "same-write-key",
+      postCheckin,
+      memoryStorage(),
+    );
+    const pending = writer.submit("I ate lunch");
+    const failed = expect(pending).rejects.toMatchObject({ status: 504 });
+    // Fingerprinting is asynchronous before the request starts.
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(75_000);
+    await failed;
+    await writer.submit("I ate lunch");
+    expect(
+      fetchMock.mock.calls.map(([, init]) => JSON.parse(init?.body as string).idempotencyKey),
+    ).toEqual(["same-write-key", "same-write-key"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("propagates caller cancellation and clears its deadline after success", async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    caller.abort();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ...TURN, userText: TURN.text }), { status: 201 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await postCheckin("I ate lunch", { idempotencyKey: "one", signal: caller.signal });
+    expect(fetchMock.mock.calls[0]?.[1].signal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("sends the idempotency key through the conversation route contract", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ...TURN, userText: TURN.text }), {

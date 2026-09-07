@@ -241,4 +241,111 @@ describeIfDb("private longitudinal context", () => {
       readings?.every((item) => item.samplesInInput === 1 && item.device !== "future-scale"),
     ).toBe(true);
   });
+
+  it("loads the advisor question paired with an eligible user turn, never a superseded turn", async () => {
+    const marker = `Synthetic follow-up ${crypto.randomUUID()}`;
+    const user = await client.query<{ message_id: string }>(
+      "insert into ashwini.messages (role, text, ts) values ('user', $1, '2099-06-01T11:58:00Z') returning message_id",
+      [marker],
+    );
+    const reply = await client.query<{ message_id: string }>(
+      "insert into ashwini.messages (role, text, ts, in_reply_to) values ('ashwini', 'How long until your workout?', '2099-06-01T11:58:01Z', $1) returning message_id",
+      [user.rows[0]!.message_id],
+    );
+    const context = await buildContext(clock, { includeWearables: false });
+    expect(
+      context.recentCheckins?.find((turn) => turn.id === user.rows[0]!.message_id),
+    ).toMatchObject({
+      text: marker,
+      advisorReply: "How long until your workout?",
+      advisorMessageId: reply.rows[0]!.message_id,
+    });
+    expect(context.healthObservations).toBeUndefined();
+    const replacement = await client.query<{ message_id: string }>(
+      "insert into ashwini.messages (role, text, ts) values ('user', $1, '2099-06-01T11:59:00Z') returning message_id",
+      [`Corrected ${marker}`],
+    );
+    await client.query("update ashwini.messages set corrected_by = $1 where message_id = $2", [
+      replacement.rows[0]!.message_id,
+      user.rows[0]!.message_id,
+    ]);
+    const corrected = await buildContext(clock, { includeWearables: false });
+    expect(corrected.recentCheckins?.some((turn) => turn.id === user.rows[0]!.message_id)).toBe(
+      false,
+    );
+    expect(
+      corrected.recentCheckins?.some((turn) => turn.advisorMessageId === reply.rows[0]!.message_id),
+    ).toBe(false);
+  });
+
+  it("retains the latest received delayed exchange even behind more than twenty newer event dates", async () => {
+    const marker = `Synthetic delayed continuity ${crypto.randomUUID()}`;
+    await client.query(
+      `insert into ashwini.messages (role, text, ts, captured_at)
+       select 'user', $1 || i::text,
+         '2100-06-01T10:00:00Z'::timestamptz + i * interval '1 minute',
+         '2100-06-01T10:00:00Z'::timestamptz + i * interval '1 minute'
+       from generate_series(1, 25) i`,
+      [`Newer event ${marker} `],
+    );
+    const delayed = await client.query<{ message_id: string }>(
+      `insert into ashwini.messages (role, text, ts, captured_at)
+       values ('user', $1, '2100-06-01T11:59:00Z', '2100-05-01T10:00:00Z') returning message_id`,
+      [marker],
+    );
+    await client.query(
+      `insert into ashwini.messages (role, text, ts, in_reply_to)
+       values ('ashwini', 'How long until your workout?', '2100-06-01T11:59:01Z', $1)`,
+      [delayed.rows[0]!.message_id],
+    );
+    const context = await buildContext(
+      { now: () => new Date("2100-06-01T12:00:00Z"), timeZone: () => "UTC" },
+      { includeWearables: false },
+    );
+    expect(context.recentCheckins).toHaveLength(20);
+    expect(context.recentCheckins?.[0]).toMatchObject({
+      id: delayed.rows[0]!.message_id,
+      text: marker,
+      at: new Date("2100-05-01T10:00:00Z"),
+      receivedAt: new Date("2100-06-01T11:59:00Z"),
+      advisorReply: "How long until your workout?",
+      advisorAt: new Date("2100-06-01T11:59:01Z"),
+    });
+    expect(context.latestReceiptTurn).toEqual({
+      id: delayed.rows[0]!.message_id,
+      receivedAt: new Date("2100-06-01T11:59:00Z"),
+      eligible: true,
+    });
+    expect(
+      context.recentCheckins?.every(
+        (turn, index, turns) =>
+          index === 0 || turns[index - 1]!.receivedAt!.getTime() >= turn.receivedAt!.getTime(),
+      ),
+    ).toBe(true);
+  });
+
+  it("retains only a content-free barrier when the newest received turn is protected", async () => {
+    const marker = `Synthetic barrier ${crypto.randomUUID()}`;
+    await client.query(
+      "insert into ashwini.messages (role, text, ts) values ('user', $1, '2110-06-01T11:58:00Z')",
+      [marker],
+    );
+    const protectedTurn = await client.query<{ message_id: string }>(
+      "insert into ashwini.messages (role, text, ts) values ('user', $1, '2110-06-01T11:59:00Z') returning message_id",
+      [SENSITIVE_REDACTION["therapy-content"]],
+    );
+    const context = await buildContext(
+      { now: () => new Date("2110-06-01T12:00:00Z"), timeZone: () => "UTC" },
+      { includeWearables: false },
+    );
+    expect(context.latestReceiptTurn).toEqual({
+      id: protectedTurn.rows[0]!.message_id,
+      receivedAt: new Date("2110-06-01T11:59:00Z"),
+      eligible: false,
+    });
+    expect(
+      context.recentCheckins?.some((turn) => turn.id === protectedTurn.rows[0]!.message_id),
+    ).toBe(false);
+    expect(JSON.stringify(context)).not.toContain(SENSITIVE_REDACTION["therapy-content"]);
+  });
 });

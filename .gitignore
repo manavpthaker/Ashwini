@@ -12,6 +12,7 @@ coverage/
 # Personal records and health exports never belong in this public repository.
 private/
 .vercel/
+supabase/.temp/
 
 # Vendored third-party agent skills (`npx skills add`). skills-lock.json pins
 # them by content hash, so they are reinstallable rather than checked in — 200K

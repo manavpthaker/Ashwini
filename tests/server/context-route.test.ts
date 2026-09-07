@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/server/auth", () => ({ currentPrincipal: mocks.principal }));
-vi.mock("@/server/context", () => ({ buildSubjectContext: mocks.context }));
+vi.mock("@/server/context", () => ({ buildHealthHistory: mocks.context }));
 vi.mock("@/server/env", () => ({ env: mocks.env }));
 vi.mock("@/lib/health-context-import", () => ({ applyHealthContextImport: mocks.apply }));
 vi.mock("pg", () => ({
@@ -64,7 +64,7 @@ function request(body: unknown = fixture, headers: Record<string, string> = {}) 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.principal.mockResolvedValue({ userId: "test-owner", email: "owner@example.test" });
-  mocks.context.mockResolvedValue({ healthHistory: [] });
+  mocks.context.mockResolvedValue([]);
   mocks.env.mockReturnValue({
     DATABASE_URL: "postgres://test:unused@127.0.0.1/test",
     ASHWINI_TIME_ZONE: "UTC",
@@ -89,7 +89,7 @@ describe("authenticated health-context API", () => {
   });
 
   it("returns stored history without caching", async () => {
-    mocks.context.mockResolvedValue({ healthHistory: [{ id: "synthetic-history" }] });
+    mocks.context.mockResolvedValue([{ id: "synthetic-history" }]);
     const result = await GET(new Request("https://ashwini.test/api/context"));
     expect(result.headers.get("cache-control")).toBe("no-store");
     expect(await result.json()).toMatchObject({

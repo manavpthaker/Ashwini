@@ -18,7 +18,8 @@
     "db:apply": "tsx scripts/apply-migrations.ts",
     "db:seed": "tsx scripts/seed.ts",
     "health:import": "tsx scripts/import-health-context.ts",
-    "health:apple": "tsx scripts/import-apple-health.ts"
+    "health:apple": "tsx scripts/import-apple-health.ts",
+    "health:apple-clinical": "tsx scripts/import-apple-health-clinical.ts"
   },
   "main": "desktop/main.cjs",
   "dependencies": {

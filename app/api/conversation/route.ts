@@ -127,7 +127,9 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     if (error instanceof IdempotencyConflictError) return problem(409, error.message);
     if (error instanceof CorrectionTargetError) return problem(409, error.message);
-    console.error("Check-in write failed", error);
+    // Driver/provider errors can contain private parameters. Operational detail
+    // belongs in the bounded, content-free advisor diagnostics, not this log.
+    console.error("ashwini.checkin.write_failed");
     return problem(503, "The check-in record is temporarily unavailable.");
   }
 }
@@ -290,8 +292,8 @@ export async function GET(request: Request): Promise<Response> {
     });
 
     return Response.json({ turns, timeZone }, { headers: { "cache-control": "no-store" } });
-  } catch (error) {
-    console.error("Check-in history query failed", error);
+  } catch {
+    console.error("ashwini.checkin.history_failed");
     return problem(503, "Check-in history is temporarily unavailable.");
   }
 }

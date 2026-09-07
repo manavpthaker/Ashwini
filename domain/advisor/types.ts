@@ -72,6 +72,16 @@ export interface RoutineSummary {
  * it belongs here — a rule reaching for anything else is a bug.
  */
 export interface SubjectContext {
+  /** Content-free continuity barrier; a protected latest turn cannot expose an older pending question. */
+  readonly latestReceiptTurn?: {
+    readonly id: string;
+    readonly receivedAt: Date;
+    readonly eligible: boolean;
+  } | null;
+  /** Source-separated, dated summaries of a bounded set of imported samples. */
+  readonly healthSummaries?: readonly HealthMetricSummary[];
+  /** Per-metric freshness; a recent activity export does not make old sleep current. */
+  readonly healthObservationCoverage?: readonly HealthObservationCoverage[];
   readonly healthObservations?: readonly {
     readonly id: string;
     readonly type: string;
@@ -89,6 +99,9 @@ export interface SubjectContext {
     readonly text: string;
     readonly at: Date;
     readonly receivedAt?: Date;
+    readonly advisorReply?: string | null;
+    readonly advisorMessageId?: string | null;
+    readonly advisorAt?: Date | null;
   }[];
   readonly mealsToday: readonly MealSummary[];
   readonly commitments: readonly Commitment[];
@@ -98,6 +111,36 @@ export interface SubjectContext {
   readonly interactionResults: readonly ExternalResultSummary[];
   readonly confoundDefinitions: readonly import("../gate").ConfoundDefinition[];
   readonly confoundEvaluations: readonly import("../gate").ConfoundEvaluation[];
+}
+
+export interface HealthObservationCoverage {
+  readonly type: string;
+  readonly label: string;
+  readonly latestEndAt: string | null;
+  readonly freshness: "recent" | "historical" | "missing";
+  readonly windowTruncated: boolean;
+}
+
+export interface HealthMetricSummary {
+  readonly id: string;
+  readonly type: string;
+  readonly label: string;
+  readonly sourceName: string;
+  /** Hash of source plus device; separate devices are never silently added together. */
+  readonly sourceKey: string;
+  readonly unit: string;
+  readonly date: string;
+  readonly periodStartAt: string;
+  readonly periodEndAt: string;
+  readonly value: number;
+  readonly sampleCount: number;
+  readonly aggregation: "recorded_total" | "recorded_duration" | "sample_mean" | "latest";
+  /** Complete means all fetched-window records, not complete sensor wear or behavior. */
+  readonly coverage: "bounded_complete" | "partial";
+  readonly freshness: "recent" | "historical";
+  readonly note: string;
+  /** Every contributing raw record in the bounded query; serializers may show a small representative subset. */
+  readonly sourceIds: readonly string[];
 }
 
 /** Source assertions remain dated context, not newly verified clinical facts. */
@@ -196,7 +239,21 @@ export interface AdvisorOutput {
   /** PRD 4.3: ask only the highest-value follow-up, never a form. */
   readonly followUp: string | null;
   readonly route: RouteDestination | null;
-  readonly trace: { readonly ruleId: string };
+  readonly trace: {
+    readonly ruleId: string;
+    readonly mode?: "rules_only" | "model" | "model_unavailable";
+    readonly reason?:
+      | "not_configured"
+      | "terminal_rule"
+      | "provider_auth"
+      | "provider_rate_limit"
+      | "provider_error"
+      | "timeout"
+      | "network"
+      | "invalid_output"
+      | "unsupported_provenance"
+      | "research_error";
+  };
 }
 
 export interface Advisor {

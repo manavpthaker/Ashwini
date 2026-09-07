@@ -68,44 +68,65 @@ export async function postCheckin(
   text: string,
   options: { idempotencyKey: string; correctionOf?: string; signal?: AbortSignal },
 ): Promise<SubmittedTurn> {
-  const response = await fetch("/api/conversation", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      text,
-      idempotencyKey: options.idempotencyKey,
-      ...(options.correctionOf ? { correctionOf: options.correctionOf } : {}),
-    }),
-    ...(options.signal ? { signal: options.signal } : {}),
-  });
+  // Longer than the server's 60-second route budget. A timeout is an uncertain
+  // write, not a rejection: the writer must retain its original retry key.
+  const controller = new AbortController();
+  const cancel = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) cancel();
+  else options.signal?.addEventListener("abort", cancel, { once: true });
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 75_000);
+  try {
+    const response = await fetch("/api/conversation", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text,
+        idempotencyKey: options.idempotencyKey,
+        ...(options.correctionOf ? { correctionOf: options.correctionOf } : {}),
+      }),
+      signal: controller.signal,
+    });
 
-  if (!response.ok) await readError(response);
+    if (!response.ok) await readError(response);
 
-  const body = (await response.json()) as {
-    userMessageId: string;
-    userText: string;
-    timeZone: string;
-    ts: string;
-    reply: SubmittedTurn["reply"];
-    decisions: SubmittedTurn["decisions"];
-    records: readonly WireRecordKind[];
-    followUp: string | null;
-    route: SubmittedTurn["route"];
-    replayed: boolean;
-  };
+    const body = (await response.json()) as {
+      userMessageId: string;
+      userText: string;
+      timeZone: string;
+      ts: string;
+      reply: SubmittedTurn["reply"];
+      decisions: SubmittedTurn["decisions"];
+      records: readonly WireRecordKind[];
+      followUp: string | null;
+      route: SubmittedTurn["route"];
+      replayed: boolean;
+    };
 
-  return {
-    userMessageId: body.userMessageId,
-    text: body.userText,
-    timeZone: body.timeZone,
-    ts: body.ts,
-    reply: body.reply,
-    decisions: body.decisions,
-    records: body.records,
-    followUp: body.followUp,
-    route: body.route,
-    replayed: body.replayed,
-  };
+    return {
+      userMessageId: body.userMessageId,
+      text: body.userText,
+      timeZone: body.timeZone,
+      ts: body.ts,
+      reply: body.reply,
+      decisions: body.decisions,
+      records: body.records,
+      followUp: body.followUp,
+      route: body.route,
+      replayed: body.replayed,
+    };
+  } catch (error) {
+    if (timedOut) {
+      throw new ConversationError("The response took too long to confirm.", 504);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", cancel);
+  }
 }
 
 /**

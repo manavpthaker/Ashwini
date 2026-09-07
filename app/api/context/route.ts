@@ -4,7 +4,7 @@ import { healthContextImportSchema } from "@/lib/health-context";
 import { applyHealthContextImport } from "@/lib/health-context-import";
 import { postgresConnectionConfig } from "@/lib/postgres-connection";
 import { currentPrincipal } from "@/server/auth";
-import { buildSubjectContext } from "@/server/context";
+import { buildHealthHistory } from "@/server/context";
 import { env } from "@/server/env";
 
 export const dynamic = "force-dynamic";
@@ -33,9 +33,9 @@ export async function GET(request: Request): Promise<Response> {
       return Response.json({ mode: advisorMode() }, { headers: noStore });
     }
     const clock = systemClock(env().ASHWINI_TIME_ZONE);
-    const context = await buildSubjectContext(clock);
+    const history = await buildHealthHistory();
     return Response.json(
-      { history: context.healthHistory ?? [], mode: advisorMode(), generatedAt: clock.now().toISOString() },
+      { history, mode: advisorMode(), generatedAt: clock.now().toISOString() },
       { headers: noStore },
     );
   } catch {

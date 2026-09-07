@@ -2,11 +2,14 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { HealthHistoryEntry } from "@/domain/advisor/types";
 import { HEALTH_CONTEXT_CATEGORIES, healthContextImportSchema, type HealthContextCategory, type HealthContextImport } from "@/lib/health-context";
-import { Button, Eyebrow, Status } from "@/components/design-system/ui";
+import { Button, buttonClassName, Eyebrow, Status } from "@/components/design-system/ui";
 import { ShieldIcon } from "@/components/product/icons";
 import styles from "./context-screen.module.css";
+import { sourceDateLabel } from "@/lib/health-context-display";
+export { sourceDateLabel } from "@/lib/health-context-display";
 
 interface ContextSnapshot {
   history: HealthHistoryEntry[];
@@ -27,17 +30,6 @@ const categoryLabels: Record<HealthContextCategory, string> = {
   care_context: "Care & personal context",
 };
 
-export function sourceDateLabel(entry: Pick<HealthHistoryEntry, "sourceDate" | "sourceDatePrecision">): string {
-  if (!entry.sourceDate || entry.sourceDatePrecision === "unknown") return "Source date unknown";
-  if (entry.sourceDatePrecision === "year") return entry.sourceDate.slice(0, 4);
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    ...(entry.sourceDatePrecision === "month" ? {} : { day: "numeric" as const }),
-    timeZone: "UTC",
-  }).format(new Date(`${entry.sourceDate}T00:00:00Z`));
-}
-
 export function ContextScreen() {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<ContextSnapshot | null>(null);
@@ -54,7 +46,7 @@ export function ContextScreen() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/context", { cache: "no-store", signal: controller.signal })
+    fetch("/api/context", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) })
       .then(async (response) => {
         if (response.status === 401) {
           router.replace("/login");
@@ -162,7 +154,7 @@ export function ContextScreen() {
               <p>{error}</p>
               <Button variant="secondary" onClick={() => { setLoading(true); setRefresh((value) => value + 1); }}>Try again</Button>
             </div>
-          ) : loading ? (
+          ) : loading && !snapshot ? (
             <p className={styles.empty} role="status">Loading your saved history…</p>
           ) : history.length === 0 ? (
             <div className={styles.empty}>
@@ -218,7 +210,7 @@ export function ContextScreen() {
               ) : null}
               <Button type="submit" disabled={!preview || importing}>{importing ? "Saving context…" : "Import health context"}</Button>
               {importError ? <p className={styles.error} role="alert">{importError}</p> : null}
-              {receipt ? <p className={styles.receipt} role="status">{receipt}</p> : null}
+              {receipt ? <><p className={styles.receipt} role="status">{receipt}</p><Link className={buttonClassName("secondary")} href="/">See my health brief</Link></> : null}
             </form>
             <p className={styles.finePrint}>Curated facts only, without therapy narratives. Raw PDFs, photos and Apple Health exports are not accepted by this form.</p>
           </section>

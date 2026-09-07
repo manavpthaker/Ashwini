@@ -4,9 +4,10 @@ export const RESEARCH_TOPICS = {
   sleep: "sleep restriction recovery adults",
   nutrition: "dietary protein energy restriction resistance training adults",
   training: "resistance training exercise adherence adults",
-  focus: "adult attention deficit hyperactivity disorder behavioral interventions",
+  focus: "attention concentration sleep physical activity adults",
   caffeine: "caffeine sleep adults",
   fatigue: "fatigue lifestyle sleep physical activity adults",
+  labs: "laboratory test interpretation reference intervals biological variation adults",
 } as const;
 export type ResearchTopic = keyof typeof RESEARCH_TOPICS;
 
@@ -34,6 +35,8 @@ export function topicsForCheckin(text: string): ResearchTopic[] {
   if (/\b(adhd|focus|attention|concentrat\w*)\b/i.test(text)) matches.push("focus");
   if (/\b(caffeine|coffee)\b/i.test(text)) matches.push("caffeine");
   if (/\b(fatigue|exhausted|energy)\b/i.test(text)) matches.push("fatigue");
+  if (/\b(labs?|blood ?(?:tests?|work|results?)|laboratory|test results?)\b/i.test(text))
+    matches.unshift("labs");
   return matches.slice(0, 2);
 }
 

@@ -119,9 +119,16 @@ disclosure; never infer it from an existing account or model credential. Health
 context shows configuration status, not a claim that a live model test passed.
 
 When enabled, the server sends the current check-in and selected historical
-assertions, recent uncorrected non-protected check-ins, routines, active medication
-and supplement identities, relevant daily records and a bounded set of imported
-observations to OpenAI's Responses API. Source filesystem paths are omitted from
+assertions, recent uncorrected non-protected check-ins and their advisor replies,
+routines, active medication and supplement identities, relevant daily records,
+and bounded imported observations and dated summaries to OpenAI's Responses API.
+Wearable retrieval covers 22 explicit priority metrics independently; source/device
+separation, dates, missing metrics, stale samples and partial coverage remain
+visible. Sleep summaries describe calendar days, not inferred nightly sleep;
+sample averages are not time-weighted. Model payloads include representative
+sample IDs; a cited summary expands to all contributing sample references in the
+durable decision record, and its identity binds the exact inputs and aggregation.
+Source filesystem paths are omitted from
 the model payload. The full raw source repository, raw Apple Health XML, therapy
 narratives, photos and documents are not sent. Recognized terminal safety routes
 run before external calls. Selected source assertions remain untrusted data, not
@@ -133,7 +140,11 @@ response logging. This is **not a promise of zero provider retention**: OpenAI's
 abuse-monitoring policies may still apply. API content is not used for model
 training by default. Review the current [OpenAI data controls](https://developers.openai.com/api/docs/guides/your-data)
 before enabling. Request timeout is 25 seconds and output is capped at 4,500
-tokens; account spending limits remain the owner's responsibility. No API key is
+tokens; account spending limits remain the owner's responsibility. Context and
+advisor diagnostics record only fixed reason codes, elapsed time and aggregate
+counts, never check-in text, health values, source IDs or raw provider errors.
+Check-in route failures log fixed operation codes, not database error contents.
+No API key is
 bundled into the client. Failures return visibly labeled rules-only guidance.
 
 Europe PMC receives only general search topics selected from a fixed vocabulary,
@@ -163,8 +174,15 @@ curation requirement, not a claim of infallible automatic narrative detection.
 
 Apple Health import supports dated records/workouts, not native live sync. Source
 device/app, units, offsets, batch provenance and cross-export deduplication remain
-intact. Route coordinates and clinical documents are excluded. Latest values
-remain dated observations, not fabricated daily totals or longitudinal trends.
+intact. Route coordinates and raw clinical documents are excluded. A separate
+bounded FHIR adapter can curate structured lab/vital observations, conditions,
+medication orders, immunizations, allergies and procedures into dated health
+context. It omits narratives, notes, attachments and patient identifiers;
+source-coded statuses do not establish current diagnoses or medication use.
+Source units, ranges and interpretation flags remain source assertions, not
+new clinical judgments. Latest values remain dated observations. Bounded summaries
+disclose their aggregation and incomplete coverage; they are not evidence of live
+monitoring, complete daily totals or causal trends.
 Do not enable external model use of HealthKit-derived context without owner
 permission for that processing. See [Apple Health import](APPLE_HEALTH.md).
 

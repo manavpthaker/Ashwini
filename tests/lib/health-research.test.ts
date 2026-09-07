@@ -1,7 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchHealthResearch, topicsForCheckin } from "@/lib/health-research";
+import { fetchHealthResearch, topicsForCheckin, RESEARCH_TOPICS } from "@/lib/health-research";
 
 describe("public literature retrieval", () => {
+  it("supports lab review without transmitting lab values or presuming an attention diagnosis", async () => {
+    const topics = topicsForCheckin(
+      "What do my labs tell you? My private result was 123.45 at Example Clinic.",
+    );
+    expect(topics).toEqual(["labs"]);
+    expect(RESEARCH_TOPICS.focus).not.toMatch(/adhd|attention deficit/i);
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ resultList: { result: [] } })));
+    await fetchHealthResearch(topics, new Date(), fetcher);
+    const request = String((fetcher.mock.calls as unknown as Array<[URL]>)[0]?.[0]);
+    expect(request).toContain("reference");
+    expect(request).not.toMatch(/123|45|Example|Clinic|private/i);
+  });
   it("maps private wording to a bounded non-identifying topic vocabulary", async () => {
     const topics = topicsForCheckin(
       "My email is private@example.org; I slept badly before training in MyTown",

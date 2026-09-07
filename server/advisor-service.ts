@@ -5,6 +5,7 @@ import { systemClock } from "@/domain/clock";
 import {
   classifySensitiveContent,
   SENSITIVE_REDACTION,
+  RULES_ADVISOR_VERSION,
   type AdvisorOutput,
   type AttachmentRef,
   type DecisionDraft,
@@ -18,6 +19,7 @@ import { buildSubjectContext } from "./context";
 import { env } from "./env";
 import { createContextualAdvisor } from "./contextual-advisor";
 import { researchForCheckin } from "./research";
+import { immediateSafetyResponse, preflightContext } from "./checkin-preflight";
 
 /**
  * The one entry point for a conversational input.
@@ -94,7 +96,19 @@ export async function handleUtterance(
       ...(settings.OPENAI_API_KEY ? { apiKey: settings.OPENAI_API_KEY } : {}),
       ...(settings.ASHWINI_MODEL ? { model: settings.ASHWINI_MODEL } : {}),
     },
-    { research: researchForCheckin },
+    {
+      research: researchForCheckin,
+      diagnostics: ({ mode, reason, durationMs, historyEntries, observationSummaries }) => {
+        // No health wording, source IDs, provider bodies, credentials or raw errors.
+        console.info("ashwini.advisor", {
+          mode,
+          ...(reason ? { reason } : {}),
+          durationMs,
+          historyEntries,
+          observationSummaries,
+        });
+      },
+    },
   );
   const now = clock.now();
   const sensitiveRuleId = classifySensitiveContent(input.text);
@@ -112,19 +126,35 @@ export async function handleUtterance(
     }
   }
 
-  const context = await buildSubjectContext(clock);
-  const output = await advisor.respond({
+  const baseInput = {
     now,
     ...(input.capturedAt ? { capturedAt: input.capturedAt } : {}),
     utterance: { text: input.text, attachments: input.attachments ?? [] },
-    context: input.correctionOf
-      ? {
-          ...context,
-          recentCheckins:
-            context.recentCheckins?.filter((item) => item.id !== input.correctionOf) ?? [],
-        }
-      : context,
-  });
+  };
+  const immediate = immediateSafetyResponse({ ...baseInput, context: preflightContext() });
+  const advisorVersion = immediate ? RULES_ADVISOR_VERSION : advisor.version;
+  let output: AdvisorOutput;
+  if (immediate) {
+    output = immediate;
+  } else {
+    const contextStarted = performance.now();
+    const context = await buildSubjectContext(clock, { text: input.text });
+    console.info("ashwini.context", {
+      durationMs: Math.round(performance.now() - contextStarted),
+      historyEntries: context.healthHistory?.length ?? 0,
+      observationSummaries: context.healthSummaries?.length ?? 0,
+    });
+    output = await advisor.respond({
+      ...baseInput,
+      context: input.correctionOf
+        ? {
+            ...context,
+            recentCheckins:
+              context.recentCheckins?.filter((item) => item.id !== input.correctionOf) ?? [],
+          }
+        : context,
+    });
+  }
 
   // Crisis routing remains terminal. Therapy privacy is independent of route
   // priority: a mixed therapy + urgent symptom is redacted but still routes to
@@ -158,7 +188,7 @@ export async function handleUtterance(
           kind: output.reply.kind,
           receipt: output.reply.receipt,
           in_reply_to: userMessage.message_id,
-          advisor_version: advisor.version,
+          advisor_version: advisorVersion,
           rule_id: output.trace.ruleId,
         })
         .returning("message_id")
@@ -204,7 +234,7 @@ export async function handleUtterance(
             refused: decision.refused,
             expires_at: decision.expiresAt,
             review_at: decision.reviewAt,
-            advisor_version: advisor.version,
+            advisor_version: advisorVersion,
             rule_id: decision.ruleId,
             message_id: advisorMessage.message_id,
             route_destination: output.route,

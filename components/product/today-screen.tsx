@@ -26,6 +26,8 @@ import {
   type TodaySnapshot,
 } from "@/lib/record-client";
 import styles from "./today-screen.module.css";
+import { fetchHealthBrief, type HealthBrief } from "@/lib/health-brief";
+import { sourceDateLabel } from "@/lib/health-context-display";
 
 const toneIcon = {
   nutrition: BowlIcon,
@@ -369,17 +371,56 @@ export function latestContinuityCheckin(
     .sort((left, right) => continuityTimestamp(right) - continuityTimestamp(left))[0];
 }
 
+export function healthBriefIsPrimary(state: {
+  decisionsLoading: boolean;
+  decisionsError: string | null;
+  hasDecision: boolean;
+  hasPending: boolean;
+  hasAnswered: boolean;
+  available: boolean;
+}): boolean {
+  return state.available && !state.decisionsLoading && !state.decisionsError && !state.hasDecision && !state.hasPending && !state.hasAnswered;
+}
+
+function HealthBriefEvidence({ brief }: { brief: HealthBrief }) {
+  return (
+    <aside className={`${styles.perspectives} ${styles.contextEvidence}`} aria-labelledby="context-evidence-title">
+      <h2 id="context-evidence-title">The context behind this</h2>
+      {brief.context.map((entry, index) => (
+        <details className={styles.contextExcerpt} key={entry.id} open={index === 0}>
+          <summary>{entry.sourceLabel}<small>{sourceDateLabel(entry)} · {entry.temporalStatus === "current" ? "Marked current by source" : "Historical context"}</small></summary>
+          <p>{entry.statement}</p>
+        </details>
+      ))}
+      {brief.coverage.length > 0 && <div className={styles.coverage}>
+        <h3>How recent is the wearable record?</h3>
+        <dl>{brief.coverage.map((item) => <div key={item.type}>
+          <dt>{item.label}</dt>
+          <dd>{item.latestEndAt ? new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: brief.timeZone }).format(new Date(item.latestEndAt)) : "No samples found"}<span>{item.freshness === "recent" ? "Within 7 days" : item.freshness === "historical" ? "Historical, not current" : "Unknown"}{item.windowTruncated ? " · partial window" : ""}</span></dd>
+        </div>)}</dl>
+      </div>}
+      <p className={styles.perspectiveBoundary}>{brief.limitation}</p>
+      <Link className={buttonClassName("quiet")} href="/context">See health context</Link>
+    </aside>
+  );
+}
+
 export function TodayScreen() {
   const router = useRouter();
-  const { checkins, openDecisions, loading: recordLoading, error: recordError } = useProduct();
+  const { checkins, openDecisions, decisionsLoading, decisionsError, historyError, reloadRecords } = useProduct();
   const [snapshot, setSnapshot] = useState<TodaySnapshot | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(true);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [healthBrief, setHealthBrief] = useState<HealthBrief | null>(null);
+  const [briefLoading, setBriefLoading] = useState(true);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const now = useNow();
   const reasoningRef = useRef<HTMLDetailsElement>(null);
-  const loading = recordLoading || snapshotLoading;
-  const error = recordError ?? snapshotError;
-  const primaryDecision = loading || error ? undefined : openDecisions[0];
+  // A history/timeline read must never hide an already loaded safety decision.
+  const primaryDecision = openDecisions[0];
+  const loading = !primaryDecision && decisionsLoading;
+  const error = primaryDecision ? null : decisionsError;
   const supersededIds = useMemo(
     () =>
       new Set(
@@ -413,6 +454,16 @@ export function TodayScreen() {
   const perspectives = primaryDecision
     ? [perspectiveFor(primaryDecision)]
     : (continuityCheckin?.response.perspectives ?? []);
+  const showingHealthBrief = healthBriefIsPrimary({ decisionsLoading, decisionsError, hasDecision: Boolean(primaryDecision), hasPending: Boolean(pendingCheckin), hasAnswered: Boolean(answeredCheckin), available: Boolean(healthBrief?.available) });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchHealthBrief(controller.signal)
+      .then((brief) => { if (!controller.signal.aborted) { setHealthBrief(brief); setBriefError(null); } })
+      .catch(() => { if (!controller.signal.aborted) setBriefError("Your health brief could not be refreshed. Your saved history has not been changed."); })
+      .finally(() => { if (!controller.signal.aborted) setBriefLoading(false); });
+    return () => controller.abort();
+  }, [refreshKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -433,7 +484,7 @@ export function TodayScreen() {
         if (!controller.signal.aborted) setSnapshotLoading(false);
       });
     return () => controller.abort();
-  }, [router]);
+  }, [router, refreshKey]);
 
   useEffect(() => {
     if (!snapshot || !now || !needsTodayRefresh(snapshot, now)) return;
@@ -530,6 +581,19 @@ export function TodayScreen() {
                 known: answeredCheckin.response.interpretation,
                 changes: "A correction, a new check-in, or a later recorded decision.",
               }
+        : showingHealthBrief && healthBrief
+          ? {
+              eyebrow: "Your health context",
+              headline: healthBrief.headline,
+              summary: healthBrief.summary,
+              status: "Source-backed brief",
+              tone: "recovery" as StatusTone,
+              recheck: "Connect this with today",
+              known: healthBrief.limitation,
+              changes: "New source data, a correction, or a check-in about how you feel today.",
+            }
+        : briefLoading
+          ? { eyebrow: "Health context", headline: "Reading the context behind your day…", summary: "Your saved history is being prepared as a short, dated brief.", status: "Loading context", tone: "neutral" as StatusTone, recheck: "No new check-in created", known: "Context read in progress.", changes: "A completed context read." }
         : hasTodayRecord
           ? {
               eyebrow: "Current record",
@@ -560,6 +624,8 @@ export function TodayScreen() {
         ? "Complete the check-in"
         : answeredCheckin?.response.decision?.selectedChoice
           ? answeredCheckin.response.decision.selectedChoice
+      : showingHealthBrief
+        ? "Review your health context"
       : upcomingTimelineItem
         ? `${upcomingTimelineItem.title} · ${snapshot ? timeLabel(upcomingTimelineItem.at, snapshot.timeZone) : ""}`
         : checkins.length === 0
@@ -586,6 +652,7 @@ export function TodayScreen() {
             <Eyebrow>{view.eyebrow}</Eyebrow>
             <h1 id="page-title" tabIndex={-1}>{view.headline}</h1>
             <p className={styles.summary}>{view.summary}</p>
+            {showingHealthBrief && healthBrief && <p className={styles.briefNextStep}><strong>A useful next step</strong>{healthBrief.nextStep}</p>}
 
             <div className={styles.statusRow}>
               <Status tone={view.tone}><RuleIcon />{view.status}</Status>
@@ -596,10 +663,11 @@ export function TodayScreen() {
               <Link
                 href={pendingCheckin
                   ? { pathname: "/check-in", query: { complete: pendingCheckin.id } }
+                  : showingHealthBrief ? { pathname: "/check-in", query: { review: "context" } }
                   : "/check-in"}
                 className={buttonClassName("primary")}
               >
-                {pendingCheckin ? "Add the missing detail" : "Check in"} <ArrowIcon />
+                {pendingCheckin ? "Add the missing detail" : showingHealthBrief ? "Review my health context" : "Check in"} <ArrowIcon />
               </Link>
               {!loading && !error && <Button variant="secondary" onClick={showReasoning}>Why this?</Button>}
               {primaryDecision ? (
@@ -607,6 +675,7 @@ export function TodayScreen() {
                   {primaryDecision.choices.length ? "See choices" : "Review decision"} <ArrowIcon />
                 </Link>
               ) : null}
+              {error || briefError || snapshotError || historyError ? <Button variant="secondary" onClick={() => { setBriefLoading(true); setSnapshotLoading(true); setRefreshKey((key) => key + 1); void reloadRecords(); }}>Retry unavailable reads</Button> : null}
             </div>
 
             {!loading && !error && (
@@ -622,14 +691,16 @@ export function TodayScreen() {
             )}
           </div>
 
-          {!loading && !error ? (
+          {!loading && !error && !showingHealthBrief ? (
             perspectives[0]
               ? <PerspectivePath item={perspectives[0]} nextLabel={primaryDecision ? nextLabelFor(primaryDecision) : pendingCheckin ? "Add one detail" : "Recorded response"} />
               : <EmptyPath />
           ) : null}
-          {!loading && !error ? <Perspectives items={perspectives} /> : null}
+          {showingHealthBrief && healthBrief ? <HealthBriefEvidence brief={healthBrief} /> : !loading && !error ? <Perspectives items={perspectives} /> : null}
         </div>
       </section>
+
+      {briefError || historyError || decisionsError ? <p className={styles.readNotice} role="status">{[briefError, historyError, decisionsError].filter(Boolean).join(" ")} Previously loaded information may be out of date.</p> : null}
 
       <section className={styles.timelineSection} aria-labelledby="today-timeline-title">
         <div className={styles.sectionHeading}>

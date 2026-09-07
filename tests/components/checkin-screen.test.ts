@@ -3,6 +3,7 @@ import {
   checkinFailureNotice,
   correctionDraft,
   hasCorrectionChange,
+  checkinSubmissionAllowed,
 } from "@/components/product/checkin-ux";
 import { ConversationError } from "@/lib/checkin-client";
 import type { CheckinRecord } from "@/lib/product-model";
@@ -29,6 +30,15 @@ const record: CheckinRecord = {
 };
 
 describe("check-in correction UX", () => {
+  test("allows a new check-in while history reads load or fail, but protects corrections", () => {
+    const state = { draft: "I feel flat today", submitting: false, correcting: false, correctionReady: true, historyLoading: true, historyError: "History unavailable" };
+    expect(checkinSubmissionAllowed(state)).toBe(true);
+    expect(checkinSubmissionAllowed({ ...state, correcting: true })).toBe(false);
+    expect(checkinSubmissionAllowed({ ...state, submitting: true })).toBe(false);
+    expect(checkinSubmissionAllowed({ ...state, draft: " " })).toBe(false);
+    expect(checkinSubmissionAllowed({ ...state, correcting: true, historyLoading: false, historyError: null })).toBe(true);
+    expect(checkinSubmissionAllowed({ ...state, correcting: true, historyLoading: false, historyError: null, correctionReady: false })).toBe(false);
+  });
   test("edits the original wording without persisting an internal correction label", () => {
     expect(correctionDraft(record)).toBe("I ate lunch");
     expect(correctionDraft(record, true)).toBe("I ate lunch — ");
@@ -48,7 +58,7 @@ describe("check-in correction UX", () => {
     );
 
     expect(notice).toMatch(/already been superseded/i);
-    expect(notice).toMatch(/record has been refreshed/i);
+    expect(notice).toMatch(/record changed/i);
     expect(notice).toMatch(/new check-in/i);
   });
 
