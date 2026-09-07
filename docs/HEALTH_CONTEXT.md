@@ -51,8 +51,8 @@ duration, not an inferred full night. A sample mean is not a clinical baseline.
 or complete behavior. Neither these summaries nor latest samples establish a
 trend, causality or current symptoms. The export remains a snapshot, not live sync.
 
-Summary identity binds the exact contributing records and computed result. A model
-citations' summary ID expands to the full contributing raw-record references on
+Summary identity binds the exact contributing records and computed result. A cited
+summary ID expands to the full contributing raw-record references on
 the saved decision; only a bounded reference preview goes into provider input.
 
 The rules remain the default and recognized terminal safety routes run before
